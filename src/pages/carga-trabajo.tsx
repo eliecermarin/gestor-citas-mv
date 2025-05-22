@@ -673,7 +673,7 @@ export default function CargaTrabajo() {
                       const emailInput = document.querySelector('input[name="email"]') as HTMLInputElement;
                       const horaSelect = document.querySelector('select[name="hora"]') as HTMLSelectElement;
                       
-                      if (nombreInput && telefonoInput && emailInput && horaSelect) {
+                      if (nombreInput && telefonoInput && emailInput && horaSelect && trabajadorActivo) {
                         const cliente = {
                           nombre: nombreInput.value,
                           telefono: telefonoInput.value,
