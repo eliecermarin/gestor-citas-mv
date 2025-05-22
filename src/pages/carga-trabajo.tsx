@@ -7,7 +7,7 @@ const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sába
 const horasCalendario = Array.from({ length: 15 }, (_, i) => `${(8 + i).toString().padStart(2, '0')}:00`); // 08:00 - 22:00
 
 // Horas para el selector del formulario (intervalos de 5 minutos)
-const horasFormulario: string[] = [];  // ← Con el tipado
+const horasFormulario: string[] = [];
 for (let hour = 8; hour <= 22; hour++) {
   for (let minute = 0; minute < 60; minute += 5) {
     if (hour === 22 && minute > 0) break; // No pasar de 22:00
@@ -26,7 +26,7 @@ type SupabaseDeleteResponse = { data: null };
 
 const supabase = {
   from: (table: string) => ({
-    select: (_fields?: string): Promise<SupabaseResponse<Trabajador | Reserva>> => {
+    select: (): Promise<SupabaseResponse<Trabajador | Reserva>> => {
       if (table === "trabajadores") {
         return Promise.resolve({ data: [
           { id: "1", nombre: "María García" },
@@ -164,7 +164,7 @@ export default function CargaTrabajo() {
 
   useEffect(() => {
     const cargarTrabajadores = async () => {
-      const { data } = await supabase.from("trabajadores").select("*");
+      const { data } = await supabase.from("trabajadores").select();
       if (data) {
         setTrabajadores(data as Trabajador[]);
         setTrabajadorActivo((data as Trabajador[])[0]?.id || null);
@@ -175,7 +175,7 @@ export default function CargaTrabajo() {
 
   useEffect(() => {
     const cargarReservas = async () => {
-      const { data } = await supabase.from("reservas").select("*");
+      const { data } = await supabase.from("reservas").select();
       if (data) {
         setReservas(data as Reserva[]);
         setReservasFiltradas(data as Reserva[]);
@@ -278,7 +278,7 @@ export default function CargaTrabajo() {
   const eliminarReserva = async (id: string) => {
     try {
       await supabase.from("reservas").delete().eq("id", id);
-      const { data: nuevasReservas } = await supabase.from("reservas").select("*");
+      const { data: nuevasReservas } = await supabase.from("reservas").select();
       if (nuevasReservas) {
         setReservas(nuevasReservas as Reserva[]);
         setReservasFiltradas(nuevasReservas as Reserva[]);
@@ -684,7 +684,7 @@ export default function CargaTrabajo() {
                         
                         if (modalDataActualizado.id) {
                           await supabase.from("reservas").update({ cliente, hora: horaSelect.value }).eq("id", modalDataActualizado.id);
-                          const { data } = await supabase.from("reservas").select("*");
+                          const { data } = await supabase.from("reservas").select();
                           if (data) {
                             setReservas(data as Reserva[]);
                             setReservasFiltradas(data as Reserva[]);
@@ -698,7 +698,7 @@ export default function CargaTrabajo() {
                             cliente,
                             observaciones: ""
                           });
-                          const { data } = await supabase.from("reservas").select("*");
+                          const { data } = await supabase.from("reservas").select();
                           if (data) {
                             setReservas(data as Reserva[]);
                             setReservasFiltradas(data as Reserva[]);
