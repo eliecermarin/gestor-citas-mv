@@ -1,170 +1,112 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useRouter } from "next/router";
 
-import React, { useState, useEffect } from 'react';
-
-// Tipos
-// -----------------------------------------------------------------
-type Horario = {
-  activo: boolean;
-  mananaInicio: string;
-  mananaFin: string;
-  tardeInicio: string;
-  tardeFin: string;
-};
-
-type DiasSemana = 'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo';
-
-type Servicio = {
-  id: number;
-  nombre: string;
-  duracion: number;
-  precio: number;
-};
-
-type Peluquero = {
-  id: number;
-  nombre: string;
-  apellido: string;
-  horarios: { [key in DiasSemana]: Horario };
-  festivos: string[];
-  servicios: number[];
-  duracionCitaDefecto: number;
-};
-
-// Componente principal
-// -----------------------------------------------------------------
 export default function Configuracion() {
-  const dias: DiasSemana[] = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
 
-  const horarioInicial: Horario = {
-    activo: true,
-    mananaInicio: '',
-    mananaFin: '',
-    tardeInicio: '',
-    tardeFin: ''
-  };
-
-  const peluqueroBase = (): Peluquero => {
-    const horarios: { [key in DiasSemana]: Horario } = dias.reduce((acc, dia) => {
-      acc[dia] = { ...horarioInicial };
-      return acc;
-    }, {} as any);
-
-    return {
-      id: Date.now(),
-      nombre: '',
-      apellido: '',
-      horarios,
-      festivos: [],
-      servicios: [],
-      duracionCitaDefecto: 30
-    };
-  };
-
-  const [peluqueros, setPeluqueros] = useState<Peluquero[]>([]);
-  const [mensajeGuardado, setMensajeGuardado] = useState<string | null>(null);
+  const [servicios, setServicios] = useState<any[]>([]);
+  const [nuevoServicio, setNuevoServicio] = useState({ nombre: "", duracion: "", precio: "" });
 
   useEffect(() => {
-    const guardados = localStorage.getItem('configPeluqueros');
-    if (guardados) {
-      setPeluqueros(JSON.parse(guardados));
-    }
+    const fetchUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data?.user) {
+        router.push("/login");
+        return;
+      }
+      setUserId(data.user.id);
+    };
+    fetchUser();
   }, []);
 
-  const guardarConfiguracion = () => {
-    localStorage.setItem('configPeluqueros', JSON.stringify(peluqueros));
-    setMensajeGuardado('✅ Configuración guardada con éxito.');
-    setTimeout(() => setMensajeGuardado(null), 3000);
+  useEffect(() => {
+    if (!userId) return;
+    const fetchServicios = async () => {
+      const { data, error } = await supabase
+        .from("servicios")
+        .select("*")
+        .eq("user_id", userId);
+
+      if (error) console.error("Error cargando servicios:", error.message);
+      else setServicios(data || []);
+    };
+    fetchServicios();
+  }, [userId]);
+
+  const guardarServicio = async () => {
+    if (!nuevoServicio.nombre || !nuevoServicio.duracion || !nuevoServicio.precio) return;
+    if (!userId) return;
+
+    const { error } = await supabase.from("servicios").insert([
+      {
+        nombre: nuevoServicio.nombre,
+        duracion: parseInt(nuevoServicio.duracion),
+        precio: parseFloat(nuevoServicio.precio),
+        user_id: userId,
+      },
+    ]);
+
+    if (error) {
+      alert("Error al guardar");
+    } else {
+      setNuevoServicio({ nombre: "", duracion: "", precio: "" });
+      const { data } = await supabase
+        .from("servicios")
+        .select("*")
+        .eq("user_id", userId);
+      setServicios(data || []);
+    }
   };
 
   return (
-    <div style={styles.body}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>🂄 Configuración del Negocio</h2>
-        <p style={styles.info}>Configura peluqueros, horarios, días festivos y servicios disponibles.</p>
+    <div className="max-w-3xl mx-auto mt-10 p-4 bg-white rounded shadow">
+      <h1 className="text-2xl font-bold mb-4 text-center text-blue-600">Configuración del Centro</h1>
 
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold mb-2 text-gray-700">Servicios</h2>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <input
+            type="text"
+            placeholder="Nombre"
+            value={nuevoServicio.nombre}
+            onChange={(e) => setNuevoServicio({ ...nuevoServicio, nombre: e.target.value })}
+            className="border p-2 rounded"
+          />
+          <input
+            type="number"
+            placeholder="Duración (min)"
+            value={nuevoServicio.duracion}
+            onChange={(e) => setNuevoServicio({ ...nuevoServicio, duracion: e.target.value })}
+            className="border p-2 rounded"
+          />
+          <input
+            type="number"
+            placeholder="Precio (€)"
+            value={nuevoServicio.precio}
+            onChange={(e) => setNuevoServicio({ ...nuevoServicio, precio: e.target.value })}
+            className="border p-2 rounded"
+          />
+        </div>
         <button
-          onClick={() => setPeluqueros([...peluqueros, peluqueroBase()])}
-          style={styles.btnSecundario}
+          onClick={guardarServicio}
+          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
         >
-          ➕ Añadir peluquero
+          Guardar Servicio
         </button>
 
-        <button onClick={guardarConfiguracion} style={styles.boton}>
-          📄 Guardar configuración
-        </button>
-
-        {mensajeGuardado && (
-          <div style={styles.mensaje}>{mensajeGuardado}</div>
-        )}
+        <ul className="mt-4 text-sm text-gray-600">
+          {servicios.map((servicio, idx) => (
+            <li key={idx}>
+              {servicio.nombre} - {servicio.duracion} min - {servicio.precio} €
+            </li>
+          ))}
+        </ul>
       </div>
+
+      {/* Aquí más secciones: peluqueros, horarios, festivos... más adelante */}
     </div>
   );
 }
-
-// Estilos en linea (CSS-in-JS)
-// -----------------------------------------------------------------
-const styles: { [key: string]: React.CSSProperties } = {
-  body: {
-    backgroundColor: '#f3f6fb',
-    padding: '40px 20px',
-    minHeight: '100vh',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'flex-start'
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: '20px',
-    padding: 40,
-    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
-    maxWidth: 800,
-    width: '100%',
-  },
-  title: {
-    color: '#1e3a8a',
-    marginBottom: 12,
-    fontSize: 24,
-    fontWeight: 700,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10
-  },
-  info: {
-    fontSize: 14,
-    color: '#475569',
-    marginBottom: 25
-  },
-  boton: {
-    marginTop: 10,
-    width: '100%',
-    backgroundColor: '#2563eb',
-    color: '#fff',
-    fontWeight: 600,
-    border: 'none',
-    padding: 12,
-    borderRadius: 12,
-    fontSize: 16,
-    cursor: 'pointer'
-  },
-  btnSecundario: {
-    marginBottom: 20,
-    width: '100%',
-    padding: '10px 16px',
-    border: '1px solid #2563eb',
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontWeight: 500
-  },
-  mensaje: {
-    marginTop: 20,
-    color: 'green',
-    backgroundColor: '#e6ffed',
-    padding: 12,
-    borderRadius: 8,
-    fontWeight: 500
-  }
-};
