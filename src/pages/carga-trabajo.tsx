@@ -7,7 +7,7 @@ const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sába
 const horasCalendario = Array.from({ length: 15 }, (_, i) => `${(8 + i).toString().padStart(2, '0')}:00`); // 08:00 - 22:00
 
 // Horas para el selector del formulario (intervalos de 5 minutos)
-const horasFormulario = [];
+const horasFormulario: string[] = [];  // ← Con el tipado
 for (let hour = 8; hour <= 22; hour++) {
   for (let minute = 0; minute < 60; minute += 5) {
     if (hour === 22 && minute > 0) break; // No pasar de 22:00
