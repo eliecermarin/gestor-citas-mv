@@ -1,18 +1,38 @@
 import { useEffect, useState, useCallback } from "react";
 import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 
+const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+// Horas para el calendario principal (de hora en hora)
+const horasCalendario = Array.from({ length: 15 }, (_, i) => `${(8 + i).toString().padStart(2, '0')}:00`); // 08:00 - 22:00
+
+// Horas para el selector del formulario (intervalos de 5 minutos)
+const horasFormulario = [];
+for (let hour = 8; hour <= 22; hour++) {
+  for (let minute = 0; minute < 60; minute += 5) {
+    if (hour === 22 && minute > 0) break; // No pasar de 22:00
+    const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    horasFormulario.push(timeString);
+  }
+}
+
 // Simulamos supabase para el ejemplo
 let mockReservas: Reserva[] = [];
 
+type SupabaseResponse<T> = { data: T[] | null };
+type SupabaseInsertResponse = { data: Reserva | null };
+type SupabaseUpdateResponse = { data: Reserva | null };
+type SupabaseDeleteResponse = { data: null };
+
 const supabase = {
   from: (table: string) => ({
-    select: (fields: string) => {
+    select: (_: string): Promise<SupabaseResponse<Trabajador | Reserva>> => {
       if (table === "trabajadores") {
         return Promise.resolve({ data: [
           { id: "1", nombre: "María García" },
           { id: "2", nombre: "Ana López" },
           { id: "3", nombre: "Carmen Silva" }
-        ]});
+        ] as Trabajador[] });
       } else if (table === "reservas") {
         // Inicializar datos de ejemplo solo la primera vez
         if (mockReservas.length === 0) {
@@ -27,7 +47,7 @@ const supabase = {
               id: "1",
               trabajador: "1",
               fecha: hoy.toISOString().split("T")[0],
-              hora: "08:15", // Reserva a las 08:00 para probar el fix
+              hora: "08:15",
               cliente: {
                 nombre: "Laura Martín García",
                 telefono: "612345678",
@@ -77,7 +97,7 @@ const supabase = {
       }
       return Promise.resolve({ data: [] });
     },
-    insert: (data: any) => {
+    insert: (data: Omit<Reserva, 'id'>): Promise<SupabaseInsertResponse> => {
       const newReserva = {
         ...data,
         id: Date.now().toString()
@@ -85,38 +105,23 @@ const supabase = {
       mockReservas.push(newReserva);
       return Promise.resolve({ data: newReserva });
     },
-    update: (data: any) => ({
-      eq: (field: string, value: any) => {
-        const index = mockReservas.findIndex((r: any) => r[field] === value);
+    update: (data: Partial<Reserva>) => ({
+      eq: (field: string, value: string): Promise<SupabaseUpdateResponse> => {
+        const index = mockReservas.findIndex((r) => (r as Record<string, unknown>)[field] === value);
         if (index !== -1) {
           mockReservas[index] = { ...mockReservas[index], ...data };
         }
-        return Promise.resolve({ data: mockReservas[index] });
+        return Promise.resolve({ data: mockReservas[index] || null });
       }
     }),
     delete: () => ({
-      eq: (field: string, value: any) => {
-        mockReservas = mockReservas.filter((r: any) => r[field] !== value);
+      eq: (field: string, value: string): Promise<SupabaseDeleteResponse> => {
+        mockReservas = mockReservas.filter((r) => (r as Record<string, unknown>)[field] !== value);
         return Promise.resolve({ data: null });
       }
     })
   })
 };
-
-const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-
-// Horas para el calendario principal (de hora en hora)
-const horasCalendario = Array.from({ length: 15 }, (_, i) => `${(8 + i).toString().padStart(2, '0')}:00`); // 08:00 - 22:00
-
-// Horas para el selector del formulario (intervalos de 5 minutos)
-const horasFormulario = [];
-for (let hour = 8; hour <= 22; hour++) {
-  for (let minute = 0; minute < 60; minute += 5) {
-    if (hour === 22 && minute > 0) break; // No pasar de 22:00
-    const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-    horasFormulario.push(timeString);
-  }
-}
 
 type Reserva = {
   id: string;
@@ -161,8 +166,8 @@ export default function CargaTrabajo() {
     const cargarTrabajadores = async () => {
       const { data } = await supabase.from("trabajadores").select("*");
       if (data) {
-        setTrabajadores(data);
-        setTrabajadorActivo(data[0]?.id || null);
+        setTrabajadores(data as Trabajador[]);
+        setTrabajadorActivo((data as Trabajador[])[0]?.id || null);
       }
     };
     cargarTrabajadores();
@@ -172,15 +177,14 @@ export default function CargaTrabajo() {
     const cargarReservas = async () => {
       const { data } = await supabase.from("reservas").select("*");
       if (data) {
-        setReservas(data);
-        setReservasFiltradas(data);
+        setReservas(data as Reserva[]);
+        setReservasFiltradas(data as Reserva[]);
       }
     };
     cargarReservas();
   }, []);
 
   const navegarAFecha = useCallback((fecha: Date) => {
-    // Encontrar el lunes de la semana de la fecha dada
     const inicioSemanaObjetivo = getInicioSemana(fecha);
     setFechaActual(inicioSemanaObjetivo);
   }, []);
@@ -213,7 +217,6 @@ export default function CargaTrabajo() {
   const getReservasPorDiaHora = (dia: string, hora: string) => {
     return reservasFiltradas.filter((r) => {
       const fecha = new Date(r.fecha);
-      const nombreDia = diasSemana[fecha.getDay() === 0 ? 6 : fecha.getDay() - 1];
       
       // Obtener la fecha de la semana actual basada en fechaActual
       const inicioSemana = getInicioSemana(fechaActual);
@@ -224,7 +227,6 @@ export default function CargaTrabajo() {
       const fechaReserva = fecha.toISOString().split('T')[0];
       const fechaDiaStr = fechaDia.toISOString().split('T')[0];
       
-      // Comparar solo la hora (sin minutos) - extraer los primeros 2 caracteres de la hora
       const horaReserva = r.hora.substring(0, 2);
       const horaSlot = hora.substring(0, 2);
       
@@ -237,7 +239,7 @@ export default function CargaTrabajo() {
   const getInicioSemana = (fecha: Date) => {
     const d = new Date(fecha);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Lunes como primer día
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
     return new Date(d.setDate(diff));
   };
 
@@ -273,46 +275,13 @@ export default function CargaTrabajo() {
     setModalData(reserva ? { ...reserva, cliente: reserva.cliente } : { fecha: iso, hora });
   };
 
-  const guardarReserva = async (cliente: { nombre: string; telefono: string; email: string }) => {
-    if (!modalData || !trabajadorActivo) return;
-    const { fecha, hora, id } = modalData;
-
-    try {
-      if (id) {
-        // Editar reserva existente
-        await supabase.from("reservas").update({ cliente }).eq("id", id);
-      } else {
-        // Crear nueva reserva
-        await supabase.from("reservas").insert({
-          trabajador: trabajadorActivo,
-          fecha,
-          hora,
-          cliente,
-          observaciones: ""
-        });
-      }
-
-      // Actualizar el estado local
-      const { data: nuevasReservas } = await supabase.from("reservas").select("*");
-      if (nuevasReservas) {
-        setReservas(nuevasReservas);
-        setReservasFiltradas(nuevasReservas);
-      }
-      
-      // NO cambiar fechaActual - mantener la semana donde se creó la cita
-      setModalData(null);
-    } catch (error) {
-      console.error('Error al guardar reserva:', error);
-    }
-  };
-
   const eliminarReserva = async (id: string) => {
     try {
       await supabase.from("reservas").delete().eq("id", id);
       const { data: nuevasReservas } = await supabase.from("reservas").select("*");
       if (nuevasReservas) {
-        setReservas(nuevasReservas);
-        setReservasFiltradas(nuevasReservas);
+        setReservas(nuevasReservas as Reserva[]);
+        setReservasFiltradas(nuevasReservas as Reserva[]);
       }
     } catch (error) {
       console.error('Error al eliminar reserva:', error);
@@ -351,7 +320,6 @@ export default function CargaTrabajo() {
       return reservasEnFechaHora.length === 0;
     }
 
-    // Si no se especifica trabajador, devolver trabajadores disponibles
     const trabajadoresOcupados = reservasEnFechaHora.map(r => r.trabajador);
     return trabajadores.filter(t => !trabajadoresOcupados.includes(t.id));
   };
@@ -364,7 +332,6 @@ export default function CargaTrabajo() {
       const fechaStr = fecha.toISOString().split('T')[0];
       const diaSemana = fecha.getDay();
       
-      // Solo días laborables (lunes a viernes)
       if (diaSemana >= 1 && diaSemana <= 5) {
         for (const hora of horasCalendario) {
           const trabajadoresDisponibles = buscarDisponibilidad(fechaStr, hora) as Trabajador[];
@@ -381,11 +348,11 @@ export default function CargaTrabajo() {
       fecha.setDate(fecha.getDate() + 1);
     }
     
-    return disponibilidades.slice(0, 10); // Máximo 10 sugerencias
+    return disponibilidades.slice(0, 10);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <div className="container mx-auto p-6">
         {/* Header */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
@@ -713,16 +680,14 @@ export default function CargaTrabajo() {
                           email: emailInput.value
                         };
                         
-                        // Usar la hora seleccionada
                         const modalDataActualizado = {...modalData, hora: horaSelect.value};
                         
-                        // Guardamos con la hora actualizada
                         if (modalDataActualizado.id) {
                           await supabase.from("reservas").update({ cliente, hora: horaSelect.value }).eq("id", modalDataActualizado.id);
                           const { data } = await supabase.from("reservas").select("*");
                           if (data) {
-                            setReservas(data);
-                            setReservasFiltradas(data);
+                            setReservas(data as Reserva[]);
+                            setReservasFiltradas(data as Reserva[]);
                           }
                           setModalData(null);
                         } else {
@@ -735,8 +700,8 @@ export default function CargaTrabajo() {
                           });
                           const { data } = await supabase.from("reservas").select("*");
                           if (data) {
-                            setReservas(data);
-                            setReservasFiltradas(data);
+                            setReservas(data as Reserva[]);
+                            setReservasFiltradas(data as Reserva[]);
                           }
                           setModalData(null);
                         }
@@ -752,6 +717,7 @@ export default function CargaTrabajo() {
           </div>
         </div>
       )}
+
       {/* Modal de consulta de disponibilidad */}
       {modalDisponibilidad && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -775,17 +741,15 @@ export default function CargaTrabajo() {
               </div>
               
               <ModalDisponibilidad 
-                reservas={reservas}
                 trabajadores={trabajadores}
                 horasCalendario={horasCalendario}
                 buscarDisponibilidad={buscarDisponibilidad}
                 obtenerProximasDisponibilidades={obtenerProximasDisponibilidades}
-                onReservar={(fecha, hora, trabajador) => {
+                onReservar={(fecha, hora) => {
                   const fechaObj = new Date(fecha);
                   navegarAFecha(fechaObj);
                   setModalDisponibilidad(false);
                   
-                  // Esperar un poco para que se actualice la vista y luego abrir modal de reserva
                   setTimeout(() => {
                     const nombreDia = diasSemana[fechaObj.getDay() === 0 ? 6 : fechaObj.getDay() - 1];
                     abrirModal(nombreDia, hora);
