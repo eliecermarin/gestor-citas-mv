@@ -22,6 +22,17 @@ type Peluquero = {
   nombre: string;
 };
 
+type ModalData = {
+  id?: string;
+  fecha: string;
+  hora: string;
+  cliente?: {
+    nombre: string;
+    telefono: string;
+    email: string;
+  };
+};
+
 export default function CargaTrabajo() {
   const [reservas, setReservas] = useState<Reserva[]>([]);
   const [peluqueros, setPeluqueros] = useState<Peluquero[]>([]);
@@ -40,16 +51,14 @@ export default function CargaTrabajo() {
   }, []);
 
   useEffect(() => {
-    if (!peluqueroActivo) return;
     const cargarReservas = async () => {
       const { data } = await supabase
         .from("reservas")
-        .select("*")
-        .eq("trabajador", peluqueroActivo);
+        .select("*");
       if (data) setReservas(data);
     };
     cargarReservas();
-  }, [peluqueroActivo]);
+  }, []);
 
   const getReservasPorDiaHora = (dia: string, hora: string) => {
     return reservas.filter((r) => {
@@ -65,18 +74,16 @@ export default function CargaTrabajo() {
     const fecha = new Date(hoy);
     fecha.setDate(hoy.getDate() + offset);
     const iso = fecha.toISOString().split("T")[0];
-    setModalData(reserva || { fecha: iso, hora });
+    setModalData(reserva ? { ...reserva, cliente: reserva.cliente } : { fecha: iso, hora });
   };
 
-  const guardarReserva = async (cliente: any) => {
-    if (!peluqueroActivo || !modalData) return;
-    const { fecha, hora } = modalData;
+  const guardarReserva = async (cliente: { nombre: string; telefono: string; email: string }) => {
+    if (!modalData) return;
+    const { fecha, hora, id } = modalData;
 
-    if (modalData.id) {
-      // Editar
-      await supabase.from("reservas").update({ cliente }).eq("id", modalData.id);
+    if (id) {
+      await supabase.from("reservas").update({ cliente }).eq("id", id);
     } else {
-      // Crear
       await supabase.from("reservas").insert({
         trabajador: peluqueroActivo,
         fecha,
@@ -87,13 +94,13 @@ export default function CargaTrabajo() {
     }
 
     setModalData(null);
-    const { data: nuevas } = await supabase.from("reservas").select("*").eq("trabajador", peluqueroActivo);
+    const { data: nuevas } = await supabase.from("reservas").select("*");
     setReservas(nuevas || []);
   };
 
   const eliminarReserva = async (id: string) => {
     await supabase.from("reservas").delete().eq("id", id);
-    const { data: nuevas } = await supabase.from("reservas").select("*").eq("trabajador", peluqueroActivo);
+    const { data: nuevas } = await supabase.from("reservas").select("*");
     setReservas(nuevas || []);
   };
 
@@ -151,20 +158,19 @@ export default function CargaTrabajo() {
           <div className="bg-white p-4 rounded w-[300px]">
             <h2 className="font-bold mb-2">{modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}</h2>
             <form onSubmit={(e) => {
-  e.preventDefault();
-  const form = e.target as HTMLFormElement & {
-    nombre: { value: string };
-    telefono: { value: string };
-    email: { value: string };
-  };
-  const cliente = {
-    nombre: form.nombre.value,
-    telefono: form.telefono.value,
-    email: form.email.value
-  };
-  guardarReserva(cliente);
-}}>
-
+              e.preventDefault();
+              const form = e.target as HTMLFormElement & {
+                nombre: { value: string };
+                telefono: { value: string };
+                email: { value: string };
+              };
+              const cliente = {
+                nombre: form.nombre.value,
+                telefono: form.telefono.value,
+                email: form.email.value
+              };
+              guardarReserva(cliente);
+            }}>
               <input name="nombre" defaultValue={modalData?.cliente?.nombre || ""} placeholder="Nombre" required className="border p-1 mb-2 w-full" />
               <input name="telefono" defaultValue={modalData?.cliente?.telefono || ""} placeholder="Teléfono" required className="border p-1 mb-2 w-full" />
               <input name="email" defaultValue={modalData?.cliente?.email || ""} placeholder="Email" required className="border p-1 mb-2 w-full" />
@@ -179,4 +185,3 @@ export default function CargaTrabajo() {
     </div>
   );
 }
-
