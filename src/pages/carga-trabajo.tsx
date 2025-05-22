@@ -26,7 +26,7 @@ type SupabaseDeleteResponse = { data: null };
 
 const supabase = {
   from: (table: string) => ({
-    select: (): Promise<SupabaseResponse<Trabajador | Reserva>> => {
+    select: (_fields?: string): Promise<SupabaseResponse<Trabajador | Reserva>> => {
       if (table === "trabajadores") {
         return Promise.resolve({ data: [
           { id: "1", nombre: "María García" },
