@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 
+const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const horas = Array.from({ length: 12 }, (_, i) => `${(9 + i).toString().padStart(2, '0')}:00`); // 09:00 - 20:00
+
 type Reserva = {
   id: string;
   trabajador: string;
@@ -25,75 +28,76 @@ export default function CargaTrabajo() {
   const [peluqueroActivo, setPeluqueroActivo] = useState<string | null>(null);
 
   useEffect(() => {
-    const cargarDatos = async () => {
-      const { data: peluqueroData } = await supabase.from("trabajadores").select("*");
-      setPeluqueros(peluqueroData || []);
-      if (peluqueroData && peluqueroData.length > 0) {
-        setPeluqueroActivo(peluqueroData[0].id);
+    const cargarPeluqueros = async () => {
+      const { data } = await supabase.from("trabajadores").select("*");
+      if (data) {
+        setPeluqueros(data);
+        setPeluqueroActivo(data[0]?.id || null);
       }
     };
-
-    cargarDatos();
+    cargarPeluqueros();
   }, []);
 
   useEffect(() => {
     if (!peluqueroActivo) return;
-
     const cargarReservas = async () => {
-      const { data: reservasData } = await supabase
+      const { data } = await supabase
         .from("reservas")
         .select("*")
-        .eq("trabajador", peluqueroActivo)
-        .order("fecha", { ascending: true });
-
-      setReservas(reservasData || []);
+        .eq("trabajador", peluqueroActivo);
+      if (data) setReservas(data);
     };
-
     cargarReservas();
   }, [peluqueroActivo]);
 
-  return (
-    <div style={{ padding: "2rem", fontFamily: "Montserrat, sans-serif" }}>
-      <h1 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>Agenda semanal</h1>
+  const getReservasPorDiaHora = (dia: string, hora: string) => {
+    return reservas.filter((r) => {
+      const fecha = new Date(r.fecha);
+      const nombreDia = diasSemana[fecha.getDay() - 1];
+      return nombreDia === dia && r.hora.startsWith(hora);
+    });
+  };
 
-      {/* Selector de peluquero */}
+  return (
+    <div className="p-4 overflow-x-auto">
+      <h1 className="text-2xl font-bold mb-4">Agenda Semanal</h1>
+
       <select
         value={peluqueroActivo || ""}
         onChange={(e) => setPeluqueroActivo(e.target.value)}
-        style={{ padding: "0.5rem", marginBottom: "1.5rem" }}
+        className="mb-4 p-2 border rounded"
       >
         {peluqueros.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.nombre}
-          </option>
+          <option key={p.id} value={p.id}>{p.nombre}</option>
         ))}
       </select>
 
-      {/* Lista de reservas */}
-      {reservas.map((r) => (
-        <div
-          key={r.id}
-          style={{
-            marginBottom: "1rem",
-            border: "1px solid #ddd",
-            borderRadius: "0.5rem",
-            padding: "1rem",
-            backgroundColor: "#fff",
-          }}
-        >
-          <p><strong>📅 Fecha:</strong> {r.fecha} - {r.hora}</p>
-          <p><strong>👤 Cliente:</strong> {r.cliente?.nombre}</p>
-          <p><strong>📞 Teléfono:</strong> {r.cliente?.telefono}</p>
-          <p><strong>✉️ Email:</strong> {r.cliente?.email}</p>
-          <p><strong>📝 Observaciones:</strong> {r.observaciones}</p>
-        </div>
-      ))}
+      <div className="grid grid-cols-[100px_repeat(7,minmax(200px,1fr))] border">
+        <div className="bg-gray-100 p-2 font-semibold">Hora</div>
+        {diasSemana.map((dia) => (
+          <div key={dia} className="bg-gray-100 p-2 font-semibold text-center">
+            {dia}
+          </div>
+        ))}
 
-      {reservas.length === 0 && (
-        <p style={{ marginTop: "1rem", color: "#666" }}>
-          No hay reservas para este peluquero.
-        </p>
-      )}
+        {horas.map((hora) => (
+          <>
+            <div className="border-t p-2 font-medium text-sm bg-white">{hora}</div>
+            {diasSemana.map((dia) => (
+              <div key={dia + hora} className="border-t border-l p-2 min-h-[60px] bg-white">
+                {getReservasPorDiaHora(dia, hora).map((r) => (
+                  <div key={r.id} className="border p-2 rounded mb-1 bg-blue-50">
+                    <p className="text-sm font-bold">{r.cliente?.nombre}</p>
+                    <p className="text-xs">📞 {r.cliente?.telefono}</p>
+                    <p className="text-xs">✉️ {r.cliente?.email}</p>
+                    <p className="text-xs">🕒 {r.hora}</p>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </>
+        ))}
+      </div>
     </div>
   );
 }
