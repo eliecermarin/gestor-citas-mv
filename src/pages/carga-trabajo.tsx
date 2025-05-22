@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 
 // Simulamos supabase para el ejemplo
@@ -179,6 +179,12 @@ export default function CargaTrabajo() {
     cargarReservas();
   }, []);
 
+  const navegarAFecha = useCallback((fecha: Date) => {
+    // Encontrar el lunes de la semana de la fecha dada
+    const inicioSemanaObjetivo = getInicioSemana(fecha);
+    setFechaActual(inicioSemanaObjetivo);
+  }, []);
+
   // Filtrar reservas cuando cambie la búsqueda
   useEffect(() => {
     if (!busqueda.trim()) {
@@ -202,13 +208,7 @@ export default function CargaTrabajo() {
         }
       }
     }
-  }, [busqueda, reservas, trabajadorActivo]);
-
-  const navegarAFecha = (fecha: Date) => {
-    // Encontrar el lunes de la semana de la fecha dada
-    const inicioSemanaObjetivo = getInicioSemana(fecha);
-    setFechaActual(inicioSemanaObjetivo);
-  };
+  }, [busqueda, reservas, trabajadorActivo, navegarAFecha]);
 
   const getReservasPorDiaHora = (dia: string, hora: string) => {
     return reservasFiltradas.filter((r) => {
@@ -525,9 +525,9 @@ export default function CargaTrabajo() {
               ))}
 
               {/* Time Slots */}
-              {horasCalendario.map((hora, horaIndex) => (
+              {horasCalendario.map((hora) => (
                 <>
-                  <div className="bg-gray-50 p-4 font-medium text-gray-700 border-t border-gray-200 flex items-center justify-center">
+                  <div key={`hora-${hora}`} className="bg-gray-50 p-4 font-medium text-gray-700 border-t border-gray-200 flex items-center justify-center">
                     {hora}
                   </div>
                   {diasSemana.map((dia) => {
@@ -700,16 +700,13 @@ export default function CargaTrabajo() {
                   </button>
                   <button 
                     type="button" 
-                    onClick={() => {
+                    onClick={async () => {
                       const nombreInput = document.querySelector('input[name="nombre"]') as HTMLInputElement;
                       const telefonoInput = document.querySelector('input[name="telefono"]') as HTMLInputElement;
                       const emailInput = document.querySelector('input[name="email"]') as HTMLInputElement;
                       const horaSelect = document.querySelector('select[name="hora"]') as HTMLSelectElement;
                       
                       if (nombreInput && telefonoInput && emailInput && horaSelect) {
-                        // Actualizar la hora en modalData antes de guardar
-                        setModalData(prev => prev ? {...prev, hora: horaSelect.value} : null);
-                        
                         const cliente = {
                           nombre: nombreInput.value,
                           telefono: telefonoInput.value,
@@ -721,29 +718,27 @@ export default function CargaTrabajo() {
                         
                         // Guardamos con la hora actualizada
                         if (modalDataActualizado.id) {
-                          supabase.from("reservas").update({ cliente, hora: horaSelect.value }).eq("id", modalDataActualizado.id).then(async () => {
-                            const { data } = await supabase.from("reservas").select("*");
-                            if (data) {
-                              setReservas(data);
-                              setReservasFiltradas(data);
-                            }
-                            setModalData(null);
-                          });
+                          await supabase.from("reservas").update({ cliente, hora: horaSelect.value }).eq("id", modalDataActualizado.id);
+                          const { data } = await supabase.from("reservas").select("*");
+                          if (data) {
+                            setReservas(data);
+                            setReservasFiltradas(data);
+                          }
+                          setModalData(null);
                         } else {
-                          supabase.from("reservas").insert({
+                          await supabase.from("reservas").insert({
                             trabajador: trabajadorActivo,
                             fecha: modalDataActualizado.fecha,
                             hora: horaSelect.value,
                             cliente,
                             observaciones: ""
-                          }).then(async () => {
-                            const { data } = await supabase.from("reservas").select("*");
-                            if (data) {
-                              setReservas(data);
-                              setReservasFiltradas(data);
-                            }
-                            setModalData(null);
                           });
+                          const { data } = await supabase.from("reservas").select("*");
+                          if (data) {
+                            setReservas(data);
+                            setReservasFiltradas(data);
+                          }
+                          setModalData(null);
                         }
                       }
                     }}
@@ -806,19 +801,22 @@ export default function CargaTrabajo() {
 }
 
 function ModalDisponibilidad({ 
-  reservas, 
   trabajadores, 
   horasCalendario, 
   buscarDisponibilidad, 
   obtenerProximasDisponibilidades, 
   onReservar 
 }: {
-  reservas: Reserva[];
   trabajadores: Trabajador[];
   horasCalendario: string[];
   buscarDisponibilidad: (fecha: string, hora: string, trabajadorId?: string) => boolean | Trabajador[];
-  obtenerProximasDisponibilidades: (fechaInicio: Date, cantidadDias?: number) => any[];
-  onReservar: (fecha: string, hora: string, trabajador: string) => void;
+  obtenerProximasDisponibilidades: (fechaInicio: Date, cantidadDias?: number) => Array<{
+    fecha: string;
+    hora: string;
+    dia: string;
+    trabajadores: Trabajador[];
+  }>;
+  onReservar: (fecha: string, hora: string) => void;
 }) {
   const [fechaConsulta, setFechaConsulta] = useState<string>(new Date().toISOString().split('T')[0]);
   const [horaConsulta, setHoraConsulta] = useState<string>("09:00");
@@ -901,7 +899,7 @@ function ModalDisponibilidad({
                 {trabajadoresDisponibles.map(t => (
                   <button
                     key={t.id}
-                    onClick={() => onReservar(fechaConsulta, horaConsulta, t.id)}
+                    onClick={() => onReservar(fechaConsulta, horaConsulta)}
                     className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-800 text-sm rounded-full transition-colors"
                   >
                     Reservar con {t.nombre}
@@ -944,7 +942,7 @@ function ModalDisponibilidad({
                     {disp.trabajadores.map((t: Trabajador) => (
                       <button
                         key={t.id}
-                        onClick={() => onReservar(disp.fecha, disp.hora, t.id)}
+                        onClick={() => onReservar(disp.fecha, disp.hora)}
                         className="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs rounded transition-colors"
                       >
                         {t.nombre}
