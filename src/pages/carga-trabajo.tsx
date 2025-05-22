@@ -14,90 +14,86 @@ type Reserva = {
   observaciones: string;
 };
 
+type Peluquero = {
+  id: string;
+  nombre: string;
+};
+
 export default function CargaTrabajo() {
   const [reservas, setReservas] = useState<Reserva[]>([]);
-  const [busqueda, setBusqueda] = useState("");
+  const [peluqueros, setPeluqueros] = useState<Peluquero[]>([]);
+  const [peluqueroActivo, setPeluqueroActivo] = useState<string | null>(null);
 
   useEffect(() => {
-    const obtenerReservas = async () => {
-      const { data, error } = await supabase
-        .from("reservas")
-        .select("*")
-        .order("fecha", { ascending: true });
-
-      if (error) {
-        console.error("Error al obtener reservas:", error);
-      } else {
-        setReservas(data);
+    const cargarDatos = async () => {
+      const { data: peluqueroData } = await supabase.from("trabajadores").select("*");
+      setPeluqueros(peluqueroData || []);
+      if (peluqueroData && peluqueroData.length > 0) {
+        setPeluqueroActivo(peluqueroData[0].id);
       }
     };
 
-    obtenerReservas();
+    cargarDatos();
   }, []);
 
-  const filtrar = reservas.filter((r) => {
-    const texto = `${r.cliente?.nombre} ${r.cliente?.telefono} ${r.cliente?.email}`.toLowerCase();
-    return texto.includes(busqueda.toLowerCase());
-  });
+  useEffect(() => {
+    if (!peluqueroActivo) return;
+
+    const cargarReservas = async () => {
+      const { data: reservasData } = await supabase
+        .from("reservas")
+        .select("*")
+        .eq("trabajador", peluqueroActivo)
+        .order("fecha", { ascending: true });
+
+      setReservas(reservasData || []);
+    };
+
+    cargarReservas();
+  }, [peluqueroActivo]);
 
   return (
-    <div
-      style={{
-        padding: "2rem",
-        fontFamily: "Montserrat, sans-serif",
-        background: "#f3f4f6",
-        minHeight: "100vh",
-      }}
-    >
-      <h1 style={{ fontSize: "1.8rem", marginBottom: "1rem", color: "#1e3a8a" }}>
-        Carga de trabajo
-      </h1>
+    <div style={{ padding: "2rem", fontFamily: "Montserrat, sans-serif" }}>
+      <h1 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>Agenda semanal</h1>
 
-      <input
-        type="text"
-        placeholder="Buscar cliente..."
-        value={busqueda}
-        onChange={(e) => setBusqueda(e.target.value)}
-        style={{
-          padding: "0.5rem",
-          borderRadius: "0.5rem",
-          width: "100%",
-          maxWidth: "400px",
-          marginBottom: "1.5rem",
-          border: "1px solid #ccc",
-        }}
-      />
+      {/* Selector de peluquero */}
+      <select
+        value={peluqueroActivo || ""}
+        onChange={(e) => setPeluqueroActivo(e.target.value)}
+        style={{ padding: "0.5rem", marginBottom: "1.5rem" }}
+      >
+        {peluqueros.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.nombre}
+          </option>
+        ))}
+      </select>
 
-      {filtrar.map((reserva) => (
+      {/* Lista de reservas */}
+      {reservas.map((r) => (
         <div
-          key={reserva.id}
+          key={r.id}
           style={{
-            background: "#fff",
-            padding: "1rem",
-            borderRadius: "0.5rem",
             marginBottom: "1rem",
-            boxShadow: "0 0 8px rgba(0,0,0,0.05)",
+            border: "1px solid #ddd",
+            borderRadius: "0.5rem",
+            padding: "1rem",
+            backgroundColor: "#fff",
           }}
         >
-          <p>
-            <strong>📅 Fecha:</strong> {reserva.fecha} a las {reserva.hora}
-          </p>
-          <p>
-            <strong>💇 Cliente:</strong> {reserva.cliente?.nombre}
-          </p>
-          <p>
-            <strong>📞 Teléfono:</strong> {reserva.cliente?.telefono}
-          </p>
-          <p>
-            <strong>✉️ Email:</strong> {reserva.cliente?.email}
-          </p>
-          {reserva.observaciones && (
-            <p>
-              <strong>📝 Observaciones:</strong> {reserva.observaciones}
-            </p>
-          )}
+          <p><strong>📅 Fecha:</strong> {r.fecha} - {r.hora}</p>
+          <p><strong>👤 Cliente:</strong> {r.cliente?.nombre}</p>
+          <p><strong>📞 Teléfono:</strong> {r.cliente?.telefono}</p>
+          <p><strong>✉️ Email:</strong> {r.cliente?.email}</p>
+          <p><strong>📝 Observaciones:</strong> {r.observaciones}</p>
         </div>
       ))}
+
+      {reservas.length === 0 && (
+        <p style={{ marginTop: "1rem", color: "#666" }}>
+          No hay reservas para este peluquero.
+        </p>
+      )}
     </div>
   );
 }
