@@ -184,16 +184,18 @@ export default function Login() {
                 boxSizing: "border-box",
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = "#667eea";
-                e.target.style.backgroundColor = "#ffffff";
-                e.target.style.transform = "translateY(-2px)";
-                e.target.style.boxShadow = "0 10px 25px rgba(102, 126, 234, 0.1)";
+                const target = e.target as HTMLInputElement;
+                target.style.borderColor = "#667eea";
+                target.style.backgroundColor = "#ffffff";
+                target.style.transform = "translateY(-2px)";
+                target.style.boxShadow = "0 10px 25px rgba(102, 126, 234, 0.1)";
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = "#e5e7eb";
-                e.target.style.backgroundColor = "#fafafa";
-                e.target.style.transform = "translateY(0)";
-                e.target.style.boxShadow = "none";
+                const target = e.target as HTMLInputElement;
+                target.style.borderColor = "#e5e7eb";
+                target.style.backgroundColor = "#fafafa";
+                target.style.transform = "translateY(0)";
+                target.style.boxShadow = "none";
               }}
             />
           </div>
@@ -228,16 +230,18 @@ export default function Login() {
                 boxSizing: "border-box",
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = "#667eea";
-                e.target.style.backgroundColor = "#ffffff";
-                e.target.style.transform = "translateY(-2px)";
-                e.target.style.boxShadow = "0 10px 25px rgba(102, 126, 234, 0.1)";
+                const target = e.target as HTMLInputElement;
+                target.style.borderColor = "#667eea";
+                target.style.backgroundColor = "#ffffff";
+                target.style.transform = "translateY(-2px)";
+                target.style.boxShadow = "0 10px 25px rgba(102, 126, 234, 0.1)";
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = "#e5e7eb";
-                e.target.style.backgroundColor = "#fafafa";
-                e.target.style.transform = "translateY(0)";
-                e.target.style.boxShadow = "none";
+                const target = e.target as HTMLInputElement;
+                target.style.borderColor = "#e5e7eb";
+                target.style.backgroundColor = "#fafafa";
+                target.style.transform = "translateY(0)";
+                target.style.boxShadow = "none";
               }}
             />
           </div>
@@ -269,14 +273,16 @@ export default function Login() {
             }}
             onMouseEnter={(e) => {
               if (!loading) {
-                e.target.style.transform = "translateY(-3px) scale(1.02)";
-                e.target.style.boxShadow = "0 15px 35px rgba(102, 126, 234, 0.4)";
+                const target = e.target as HTMLButtonElement;
+                target.style.transform = "translateY(-3px) scale(1.02)";
+                target.style.boxShadow = "0 15px 35px rgba(102, 126, 234, 0.4)";
               }
             }}
             onMouseLeave={(e) => {
               if (!loading) {
-                e.target.style.transform = "translateY(0) scale(1)";
-                e.target.style.boxShadow = "0 10px 25px rgba(102, 126, 234, 0.3)";
+                const target = e.target as HTMLButtonElement;
+                target.style.transform = "translateY(0) scale(1)";
+                target.style.boxShadow = "0 10px 25px rgba(102, 126, 234, 0.3)";
               }
             }}
           >
