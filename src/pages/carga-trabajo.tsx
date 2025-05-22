@@ -26,7 +26,7 @@ export default function CargaTrabajo() {
   const [reservas, setReservas] = useState<Reserva[]>([]);
   const [peluqueros, setPeluqueros] = useState<Peluquero[]>([]);
   const [peluqueroActivo, setPeluqueroActivo] = useState<string | null>(null);
-  const [modalData, setModalData] = useState<any>(null);
+  const [modalData, setModalData] = useState<ModalData | null>(null);
 
   useEffect(() => {
     const cargarPeluqueros = async () => {
@@ -151,15 +151,20 @@ export default function CargaTrabajo() {
           <div className="bg-white p-4 rounded w-[300px]">
             <h2 className="font-bold mb-2">{modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}</h2>
             <form onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.target as HTMLFormElement;
-              const cliente = {
-                nombre: form.nombre.value,
-                telefono: form.telefono.value,
-                email: form.email.value
-              };
-              guardarReserva(cliente);
-            }}>
+  e.preventDefault();
+  const form = e.target as HTMLFormElement & {
+    nombre: { value: string };
+    telefono: { value: string };
+    email: { value: string };
+  };
+  const cliente = {
+    nombre: form.nombre.value,
+    telefono: form.telefono.value,
+    email: form.email.value
+  };
+  guardarReserva(cliente);
+}}>
+
               <input name="nombre" defaultValue={modalData?.cliente?.nombre || ""} placeholder="Nombre" required className="border p-1 mb-2 w-full" />
               <input name="telefono" defaultValue={modalData?.cliente?.telefono || ""} placeholder="Teléfono" required className="border p-1 mb-2 w-full" />
               <input name="email" defaultValue={modalData?.cliente?.email || ""} placeholder="Email" required className="border p-1 mb-2 w-full" />
