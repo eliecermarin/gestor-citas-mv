@@ -9,7 +9,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   // Manejador para inicio de sesión
-  const handleLogin = (e) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     
