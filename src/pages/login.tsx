@@ -12,10 +12,15 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+      console.log("Intentando login con:", email, password);
+
+
+    const { error } = await supabase.auth.signInWithPassword({
+
       email,
       password,
     });
+
 
     if (error) {
       alert("Usuario o contraseña incorrecto");
