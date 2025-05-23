@@ -1,9 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { supabase } from "../supabaseClient";
 
+interface Trabajador {
+  id: string;
+  nombre: string;
+}
+
+interface Servicio {
+  id: string;
+  nombre: string;
+  duracion: number;
+}
+
 export default function Reserva() {
-  const [trabajadores, setTrabajadores] = useState([]);
-  const [servicios, setServicios] = useState([]);
+  const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
+  const [servicios, setServicios] = useState<Servicio[]>([]);
   const [trabajadorId, setTrabajadorId] = useState("");
   const [servicioId, setServicioId] = useState("");
   const [fecha, setFecha] = useState("");
@@ -23,9 +34,9 @@ export default function Reserva() {
     cargarDatos();
   }, []);
 
-  const enviarReserva = async (e: any) => {
+  const enviarReserva = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const servicio = servicios.find((s: any) => s.id === servicioId);
+    const servicio = servicios.find((s) => s.id === servicioId);
     if (!trabajadorId || !servicio || !fecha || !hora) return;
 
     const { error } = await supabase.from("reservas").insert({
@@ -58,7 +69,7 @@ export default function Reserva() {
             className="w-full border p-2"
           >
             <option value="">Selecciona un trabajador</option>
-            {trabajadores.map((t: any) => (
+            {trabajadores.map((t) => (
               <option key={t.id} value={t.id}>{t.nombre}</option>
             ))}
           </select>
@@ -70,7 +81,7 @@ export default function Reserva() {
             className="w-full border p-2"
           >
             <option value="">Selecciona un servicio</option>
-            {servicios.map((s: any) => (
+            {servicios.map((s) => (
               <option key={s.id} value={s.id}>{s.nombre}</option>
             ))}
           </select>
