@@ -17,13 +17,18 @@ export default function RegistroCliente() {
     setCargando(true);
     setError("");
 
+    console.log("Registrando usuario:", email);
+
     // 1. Crear usuario en Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
     });
 
-    if (authError || !authData.user) {
+    console.log("authData:", authData);
+    console.log("authError:", authError);
+
+    if (authError || !authData?.user) {
       setError("Error creando usuario. Intenta con otro email.");
       setCargando(false);
       return;
@@ -33,7 +38,7 @@ export default function RegistroCliente() {
 
     // 2. Insertar cliente en tabla 'clientes'
     const fechaHoy = new Date().toISOString().split("T")[0];
-    await supabase.from("clientes").insert({
+    const { error: insertError1 } = await supabase.from("clientes").insert({
       id: user_id,
       email,
       fecha_alta: fechaHoy,
@@ -41,16 +46,32 @@ export default function RegistroCliente() {
       onboarding: false,
     });
 
+    console.log("Insert clientes error:", insertError1);
+
+    if (insertError1) {
+      setError("Error guardando cliente en la base de datos.");
+      setCargando(false);
+      return;
+    }
+
     // 3. Crear configuración vacía por defecto
-    await supabase.from("configuracion").insert({
+    const { error: insertError2 } = await supabase.from("configuracion").insert({
       user_id,
       nombre_negocio: nombreNegocio,
       dias_reserva_max: 30,
     });
 
+    console.log("Insert configuracion error:", insertError2);
+
+    if (insertError2) {
+      setError("Error creando la configuración inicial.");
+      setCargando(false);
+      return;
+    }
+
     setCreado(true);
     setCargando(false);
-    router.push("/configuracion"); // Redirige al onboarding de configuración
+    router.push("/configuracion"); // Redirige al onboarding
   };
 
   return (
