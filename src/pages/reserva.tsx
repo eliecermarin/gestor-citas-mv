@@ -1,53 +1,226 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, User, Mail, Phone, Scissors, Check, AlertCircle, Loader2, Edit3, X } from 'lucide-react';
+import { supabase } from '../lib/supabaseclient';
+import { useRouter } from 'next/router';
 
-const ReservationSystem = () => {
-  const [formData, setFormData] = useState<{
-    name: string;
-    email: string;
-    phone: string;
-    date: string;
-    time: string;
-    service: string;
-    notes: string;
-  }>({
+interface FormData {
+  name: string;
+  email: string;
+  phone: string;
+  date: string;
+  time: string;
+  service: string;
+  worker: string;
+  notes: string;
+}
+
+interface Servicio {
+  id: number;
+  nombre: string;
+  duracion: number;
+  precio: number;
+}
+
+interface Trabajador {
+  id: string;
+  nombre: string;
+  servicios: number[];
+  festivos: string[];
+  duracionCitaDefecto: number;
+}
+
+interface BusinessConfig {
+  nombre_negocio: string;
+  dias_reserva_max: number;
+}
+
+const ReservationSystem = ({ businessId }: { businessId?: string }) => {
+  const router = useRouter();
+  
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     email: '',
     phone: '',
     date: '',
     time: '',
     service: '',
+    worker: '',
     notes: ''
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [reservationConfirmed, setReservationConfirmed] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reservationConfirmed, setReservationConfirmed] = useState(false);
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Datos de configuración
+  const [services, setServices] = useState<Servicio[]>([]);
+  const [workers, setWorkers] = useState<Trabajador[]>([]);
+  const [businessConfig, setBusinessConfig] = useState<BusinessConfig | null>(null);
+  const [existingReservations, setExistingReservations] = useState<any[]>([]);
+  const [currentBusinessId, setCurrentBusinessId] = useState<string | null>(null);
 
-  // Servicios disponibles - esto vendrá de Supabase
-  const services: Array<{id: string, name: string, duration: number, price: number}> = [
-    { id: 'corte-pelo', name: 'Corte de Pelo', duration: 30, price: 25 },
-    { id: 'tinte', name: 'Tinte', duration: 90, price: 45 },
-    { id: 'peinado', name: 'Peinado', duration: 45, price: 35 },
-    { id: 'tratamiento', name: 'Tratamiento Capilar', duration: 60, price: 40 }
-  ];
+  // Obtener el businessId del usuario actual o usar el prop
+  useEffect(() => {
+    const getUserBusinessId = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setCurrentBusinessId(user.id);
+        } else if (businessId) {
+          setCurrentBusinessId(businessId);
+        } else {
+          // Si no hay usuario ni businessId, redirigir al login
+          router.push('/login');
+          return;
+        }
+      } catch (error) {
+        console.error('Error getting user:', error);
+        router.push('/login');
+      }
+    };
 
-  // Generar horarios disponibles
-  const generateTimeSlots = () => {
+    getUserBusinessId();
+  }, [businessId, router]);
+
+  // Cargar configuración del negocio
+  useEffect(() => {
+    const loadBusinessData = async () => {
+      if (!currentBusinessId) return;
+
+      try {
+        setIsLoading(true);
+        
+        // Cargar configuración general
+        const { data: config, error: configError } = await supabase
+          .from('configuracion')
+          .select('*')
+          .eq('user_id', currentBusinessId)
+          .single();
+
+        if (configError && configError.code !== 'PGRST116') { // PGRST116 = no rows returned
+          console.error('Error cargando configuración:', configError);
+        } else {
+          setBusinessConfig(config);
+        }
+
+        // Cargar servicios
+        const { data: servicesData, error: servicesError } = await supabase
+          .from('servicios')
+          .select('*')
+          .eq('user_id', currentBusinessId);
+
+        if (servicesError) {
+          console.error('Error cargando servicios:', servicesError);
+        } else {
+          setServices(servicesData || []);
+        }
+
+        // Cargar trabajadores
+        const { data: workersData, error: workersError } = await supabase
+          .from('trabajadores')
+          .select('*')
+          .eq('user_id', currentBusinessId);
+
+        if (workersError) {
+          console.error('Error cargando trabajadores:', workersError);
+        } else {
+          // Procesar trabajadores con sus servicios
+          const processedWorkers = (workersData || []).map((worker: any) => ({
+            ...worker,
+            servicios: worker.servicios || [],
+            festivos: worker.festivos || []
+          }));
+          setWorkers(processedWorkers);
+        }
+
+        // Cargar reservas existentes para validar disponibilidad
+        const { data: reservationsData, error: reservationsError } = await supabase
+          .from('reservas')
+          .select('*')
+          .eq('user_id', currentBusinessId);
+
+        if (reservationsError) {
+          console.error('Error cargando reservas:', reservationsError);
+        } else {
+          setExistingReservations(reservationsData || []);
+        }
+
+      } catch (error) {
+        console.error('Error cargando datos del negocio:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadBusinessData();
+  }, [currentBusinessId]);
+
+  // Generar horarios disponibles basados en trabajador y fecha seleccionada
+  useEffect(() => {
+    generateAvailableTimes();
+  }, [formData.worker, formData.date, existingReservations]);
+
+  const generateAvailableTimes = () => {
+    if (!formData.worker || !formData.date) {
+      setAvailableTimes([]);
+      return;
+    }
+
+    const selectedWorker = workers.find(w => w.id === formData.worker);
+    if (!selectedWorker) {
+      setAvailableTimes([]);
+      return;
+    }
+
+    // Verificar si la fecha es un día festivo para el trabajador
+    const selectedDate = new Date(formData.date);
+    const dateString = formData.date;
+    
+    if (selectedWorker.festivos && selectedWorker.festivos.includes(dateString)) {
+      setAvailableTimes([]);
+      return;
+    }
+
+    // Generar slots de tiempo (cada 15 minutos de 8:00 a 22:00)
     const slots = [];
-    for (let hour = 9; hour <= 20; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
+    for (let hour = 8; hour <= 21; hour++) {
+      for (let minute = 0; minute < 60; minute += 15) {
+        if (hour === 21 && minute > 45) break; // No pasar de 21:45
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-        slots.push(timeString);
+        
+        // Verificar si el slot está ocupado
+        const isOccupied = existingReservations.some(reservation => 
+          reservation.trabajador === formData.worker &&
+          reservation.fecha === dateString &&
+          reservation.hora === timeString
+        );
+
+        if (!isOccupied) {
+          slots.push(timeString);
+        }
       }
     }
-    return slots;
+
+    setAvailableTimes(slots);
   };
 
-  useEffect(() => {
-    setAvailableTimes(generateTimeSlots());
-  }, []);
+  // Obtener servicios disponibles para el trabajador seleccionado
+  const getAvailableServices = () => {
+    if (!formData.worker) {
+      return services;
+    }
+
+    const selectedWorker = workers.find(w => w.id === formData.worker);
+    if (!selectedWorker || !selectedWorker.servicios || selectedWorker.servicios.length === 0) {
+      return services;
+    }
+
+    return services.filter(service => 
+      selectedWorker.servicios.includes(service.id)
+    );
+  };
 
   // Validación de formulario
   const validateForm = () => {
@@ -63,6 +236,7 @@ const ReservationSystem = () => {
     if (!formData.date) newErrors.date = 'La fecha es requerida';
     if (!formData.time) newErrors.time = 'La hora es requerida';
     if (!formData.service) newErrors.service = 'Selecciona un servicio';
+    if (!formData.worker) newErrors.worker = 'Selecciona un trabajador';
 
     // Validar que la fecha no sea en el pasado
     const selectedDate = new Date(formData.date);
@@ -71,6 +245,30 @@ const ReservationSystem = () => {
     
     if (selectedDate < today) {
       newErrors.date = 'No puedes reservar en fechas pasadas';
+    }
+
+    // Validar límite de días de antelación
+    if (businessConfig && businessConfig.dias_reserva_max) {
+      const maxDate = new Date();
+      maxDate.setDate(maxDate.getDate() + businessConfig.dias_reserva_max);
+      
+      if (selectedDate > maxDate) {
+        newErrors.date = `No puedes reservar con más de ${businessConfig.dias_reserva_max} días de antelación`;
+      }
+    }
+
+    // Validar disponibilidad del trabajador en la fecha
+    const selectedWorker = workers.find(w => w.id === formData.worker);
+    if (selectedWorker && selectedWorker.festivos && selectedWorker.festivos.includes(formData.date)) {
+      newErrors.date = 'El trabajador no está disponible en esta fecha';
+    }
+
+    // Validar que el servicio esté disponible para el trabajador
+    if (formData.service && formData.worker) {
+      const availableServices = getAvailableServices();
+      if (!availableServices.find(s => s.id.toString() === formData.service)) {
+        newErrors.service = 'Este servicio no está disponible para el trabajador seleccionado';
+      }
     }
 
     setErrors(newErrors);
@@ -86,6 +284,23 @@ const ReservationSystem = () => {
       [name]: value
     }));
 
+    // Limpiar servicios y horarios si cambia el trabajador
+    if (name === 'worker') {
+      setFormData(prev => ({
+        ...prev,
+        service: '',
+        time: ''
+      }));
+    }
+
+    // Limpiar horarios si cambia la fecha
+    if (name === 'date') {
+      setFormData(prev => ({
+        ...prev,
+        time: ''
+      }));
+    }
+
     // Limpiar error del campo cuando el usuario empiece a escribir
     if (errors[name]) {
       setErrors(prev => ({
@@ -95,52 +310,34 @@ const ReservationSystem = () => {
     }
   };
 
-  // Simulación de envío a Supabase
+  // Envío de reserva a Supabase
   const submitReservation = async () => {
-    // Aquí irá la lógica real de Supabase
-    // const { data: result, error } = await supabase
-    //   .from('reservations')
-    //   .insert([data]);
-    
-    // Para conectar con Supabase real, descomenta lo siguiente:
-    /*
-    const { createClient } = require(&apos;@supabase/supabase-js&apos;);
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    );
-    
-    const { data: result, error } = await supabase
-      .from(&apos;reservations&apos;)
+    if (!currentBusinessId) throw new Error('No business ID');
+
+    const cliente = {
+      nombre: formData.name,
+      email: formData.email,
+      telefono: formData.phone
+    };
+
+    const { data, error } = await supabase
+      .from('reservas')
       .insert([{
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
-        reservation_date: data.date,
-        reservation_time: data.time,
-        service_type: data.service,
-        notes: data.notes,
-        status: &apos;pending&apos;,
-        created_at: new Date().toISOString()
-      }]);
-      
-    if (error) throw error;
-    return { success: true, data: result };
-    */
-    
-    // Simulación de API call
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        if (Math.random() > 0.1) { // 90% éxito
-          resolve({ 
-            success: true, 
-            id: Date.now()
-          });
-        } else {
-          reject(new Error('Error de conexión'));
-        }
-      }, 2000);
-    });
+        trabajador: formData.worker,
+        fecha: formData.date,
+        hora: formData.time,
+        cliente: cliente,
+        observaciones: formData.notes || '',
+        user_id: currentBusinessId
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return { success: true, data };
   };
 
   // Manejo del envío del formulario
@@ -152,6 +349,18 @@ const ReservationSystem = () => {
     try {
       await submitReservation();
       setReservationConfirmed(true);
+      
+      // Recargar reservas existentes
+      if (currentBusinessId) {
+        const { data: reservationsData } = await supabase
+          .from('reservas')
+          .select('*')
+          .eq('user_id', currentBusinessId);
+        
+        if (reservationsData) {
+          setExistingReservations(reservationsData);
+        }
+      }
 
     } catch (error) {
       setErrors({ submit: 'Error al procesar la reserva. Intenta nuevamente.' });
@@ -167,9 +376,25 @@ const ReservationSystem = () => {
     return today.toISOString().split('T')[0];
   };
 
+  // Obtener fecha máxima basada en configuración
+  const getMaxDate = () => {
+    if (!businessConfig || !businessConfig.dias_reserva_max) {
+      return undefined;
+    }
+    
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + businessConfig.dias_reserva_max);
+    return maxDate.toISOString().split('T')[0];
+  };
+
   // Obtener servicio seleccionado
   const getSelectedService = () => {
-    return services.find(s => s.id === formData.service) || null;
+    return services.find(s => s.id.toString() === formData.service) || null;
+  };
+
+  // Obtener trabajador seleccionado
+  const getSelectedWorker = () => {
+    return workers.find(w => w.id === formData.worker) || null;
   };
 
   // Editar reserva (mantener datos)
@@ -187,11 +412,44 @@ const ReservationSystem = () => {
       date: '',
       time: '',
       service: '',
+      worker: '',
       notes: ''
     });
     setReservationConfirmed(false);
     setErrors({});
   };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-lg mx-auto p-8 bg-white rounded-2xl shadow-xl">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Cargando información del negocio...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (workers.length === 0 || services.length === 0) {
+    return (
+      <div className="max-w-lg mx-auto p-8 bg-white rounded-2xl shadow-xl">
+        <div className="text-center">
+          <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertCircle className="w-10 h-10 text-yellow-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">
+            Configuración Pendiente
+          </h2>
+          <p className="text-gray-600 mb-6">
+            Este negocio aún no ha configurado sus servicios y trabajadores.
+          </p>
+          <p className="text-sm text-gray-500">
+            Por favor, contacta con el administrador del negocio.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (reservationConfirmed) {
     return (
@@ -209,7 +467,11 @@ const ReservationSystem = () => {
             <div className="space-y-3 text-left">
               <div className="flex justify-between">
                 <span className="text-gray-600">Servicio:</span>
-                <span className="font-medium">{getSelectedService()?.name || 'No seleccionado'}</span>
+                <span className="font-medium">{getSelectedService()?.nombre || 'No seleccionado'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Trabajador:</span>
+                <span className="font-medium">{getSelectedWorker()?.nombre || 'No seleccionado'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Fecha:</span>
@@ -223,6 +485,12 @@ const ReservationSystem = () => {
                 <span className="text-gray-600">Cliente:</span>
                 <span className="font-medium">{formData.name}</span>
               </div>
+              {getSelectedService()?.precio && getSelectedService()!.precio > 0 && (
+                <div className="flex justify-between border-t pt-2">
+                  <span className="text-gray-600">Precio:</span>
+                  <span className="font-medium text-green-600">{getSelectedService()?.precio}€</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -240,7 +508,7 @@ const ReservationSystem = () => {
               className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium"
             >
               <X className="w-4 h-4 inline mr-2" />
-              Cancelar
+              Nueva Reserva
             </button>
           </div>
         </div>
@@ -259,7 +527,7 @@ const ReservationSystem = () => {
             Reservar Cita
           </h1>
           <p className="text-gray-600">
-            Completa los datos para confirmar tu reserva
+            {businessConfig?.nombre_negocio || 'Completa los datos para confirmar tu reserva'}
           </p>
         </div>
 
@@ -336,6 +604,35 @@ const ReservationSystem = () => {
             )}
           </div>
 
+          {/* Trabajador */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-3">
+              <User className="inline w-4 h-4 mr-2 text-blue-600" />
+              Trabajador
+            </label>
+            <select
+              name="worker"
+              value={formData.worker}
+              onChange={handleInputChange}
+              className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none ${
+                errors.worker ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <option value="">Selecciona un trabajador</option>
+              {workers.map(worker => (
+                <option key={worker.id} value={worker.id}>
+                  {worker.nombre}
+                </option>
+              ))}
+            </select>
+            {errors.worker && (
+              <p className="text-red-500 text-sm mt-2 flex items-center">
+                <AlertCircle className="w-4 h-4 mr-1" />
+                {errors.worker}
+              </p>
+            )}
+          </div>
+
           {/* Servicio */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-3">
@@ -346,14 +643,18 @@ const ReservationSystem = () => {
               name="service"
               value={formData.service}
               onChange={handleInputChange}
+              disabled={!formData.worker}
               className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none ${
                 errors.service ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300'
-              }`}
+              } ${!formData.worker ? 'bg-gray-100 cursor-not-allowed' : ''}`}
             >
-              <option value="">Selecciona un servicio</option>
-              {services.map(service => (
+              <option value="">
+                {!formData.worker ? 'Primero selecciona un trabajador' : 'Selecciona un servicio'}
+              </option>
+              {getAvailableServices().map(service => (
                 <option key={service.id} value={service.id}>
-                  {service.name} - {service.duration} min - {service.price}€
+                  {service.nombre} - {service.duracion} min
+                  {service.precio > 0 ? ` - ${service.precio}€` : ''}
                 </option>
               ))}
             </select>
@@ -378,9 +679,11 @@ const ReservationSystem = () => {
                 value={formData.date}
                 onChange={handleInputChange}
                 min={getMinDate()}
+                max={getMaxDate()}
+                disabled={!formData.worker}
                 className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none ${
                   errors.date ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300'
-                }`}
+                } ${!formData.worker ? 'bg-gray-100 cursor-not-allowed' : ''}`}
               />
               {errors.date && (
                 <p className="text-red-500 text-sm mt-2 flex items-center">
@@ -399,11 +702,16 @@ const ReservationSystem = () => {
                 name="time"
                 value={formData.time}
                 onChange={handleInputChange}
+                disabled={!formData.date || availableTimes.length === 0}
                 className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none ${
                   errors.time ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300'
-                }`}
+                } ${(!formData.date || availableTimes.length === 0) ? 'bg-gray-100 cursor-not-allowed' : ''}`}
               >
-                <option value="">Selecciona una hora</option>
+                <option value="">
+                  {!formData.date ? 'Primero selecciona una fecha' : 
+                   availableTimes.length === 0 ? 'No hay horarios disponibles' : 
+                   'Selecciona una hora'}
+                </option>
                 {availableTimes.map(time => (
                   <option key={time} value={time}>
                     {time}
@@ -414,6 +722,12 @@ const ReservationSystem = () => {
                 <p className="text-red-500 text-sm mt-2 flex items-center">
                   <AlertCircle className="w-4 h-4 mr-1" />
                   {errors.time}
+                </p>
+              )}
+              {formData.date && availableTimes.length === 0 && (
+                <p className="text-amber-600 text-sm mt-2 flex items-center">
+                  <AlertCircle className="w-4 h-4 mr-1" />
+                  No hay horarios disponibles para esta fecha
                 </p>
               )}
             </div>
@@ -440,6 +754,23 @@ const ReservationSystem = () => {
               <div className="flex items-center gap-3 text-red-800">
                 <AlertCircle className="w-5 h-5" />
                 <span>{errors.submit}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Resumen de selección */}
+          {formData.service && formData.worker && formData.date && formData.time && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+              <h3 className="font-semibold text-blue-800 mb-2">Resumen de tu reserva:</h3>
+              <div className="text-sm text-blue-700 space-y-1">
+                <p><strong>Servicio:</strong> {getSelectedService()?.nombre}</p>
+                <p><strong>Trabajador:</strong> {getSelectedWorker()?.nombre}</p>
+                <p><strong>Fecha:</strong> {new Date(formData.date).toLocaleDateString('es-ES')}</p>
+                <p><strong>Hora:</strong> {formData.time}</p>
+                <p><strong>Duración:</strong> {getSelectedService()?.duracion} minutos</p>
+                {getSelectedService()?.precio && getSelectedService()!.precio > 0 && (
+                  <p><strong>Precio:</strong> {getSelectedService()?.precio}€</p>
+                )}
               </div>
             </div>
           )}

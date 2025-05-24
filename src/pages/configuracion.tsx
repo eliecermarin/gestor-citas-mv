@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
+import { supabase } from "../lib/supabaseclient";
+import { useRouter } from "next/router";
 
 interface Servicio {
   id: number;
@@ -7,14 +9,16 @@ interface Servicio {
   duracion: number;
   precio: number;
   mostrarPrecio: boolean;
+  user_id?: string;
 }
 
 interface Trabajador {
-  id: number;
+  id: string;
   nombre: string;
   servicios: Servicio[];
   festivos: string[];
   limiteDiasReserva: number;
+  user_id?: string;
 }
 
 interface NuevoServicio {
@@ -25,43 +29,92 @@ interface NuevoServicio {
 }
 
 export default function Configuracion() {
-  const [trabajadores, setTrabajadores] = useState<Trabajador[]>([
-    {
-      id: 1,
-      nombre: "María García",
-      servicios: [
-        { id: 1, nombre: "Corte de pelo", duracion: 30, precio: 25, mostrarPrecio: true },
-        { id: 2, nombre: "Tinte", duracion: 90, precio: 45, mostrarPrecio: true }
-      ],
-      festivos: ["2025-12-25", "2025-01-01"],
-      limiteDiasReserva: 30
-    },
-    {
-      id: 2,
-      nombre: "Juan Pérez",
-      servicios: [
-        { id: 1, nombre: "Masaje relajante", duracion: 60, precio: 35, mostrarPrecio: true },
-        { id: 2, nombre: "Consulta", duracion: 45, precio: 0, mostrarPrecio: false }
-      ],
-      festivos: ["2025-12-31", "2025-08-15"],
-      limiteDiasReserva: 45
-    }
-  ]);
-
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
+  const [serviciosGlobales, setServiciosGlobales] = useState<Servicio[]>([]);
   const [nuevoTrabajador, setNuevoTrabajador] = useState<string>("");
-  const [trabajadorExpandido, setTrabajadorExpandido] = useState<number | null>(1);
+  const [trabajadorExpandido, setTrabajadorExpandido] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<string>("");
-
-  const [nuevosServicios, setNuevosServicios] = useState<Record<number, NuevoServicio>>({});
-  const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState<Record<number, string>>({});
+  const [nuevosServicios, setNuevosServicios] = useState<Record<string, NuevoServicio>>({});
+  const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState<Record<string, string>>({});
 
   const showMessage = (msg: string) => {
     setMessage(msg);
     setTimeout(() => setMessage(""), 3000);
   };
 
-  const inicializarEstadosTrabajador = (trabajadorId: number) => {
+  // Verificar autenticación y cargar datos
+  useEffect(() => {
+    const checkAuthAndLoadData = async () => {
+      try {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+          setUser(currentUser);
+          await cargarDatos(currentUser.id);
+        } else {
+          router.push('/login');
+        }
+      } catch (error) {
+        console.error('Error de autenticación:', error);
+        router.push('/login');
+      }
+    };
+
+    checkAuthAndLoadData();
+  }, [router]);
+
+  const cargarDatos = async (userId: string) => {
+    setIsLoading(true);
+    try {
+      // Cargar servicios globales
+      const { data: servicios, error: errorServicios } = await supabase
+        .from('servicios')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (errorServicios) throw errorServicios;
+      setServiciosGlobales(servicios || []);
+
+      // Cargar trabajadores
+      const { data: trabajadoresData, error: errorTrabajadores } = await supabase
+        .from('trabajadores')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (errorTrabajadores) throw errorTrabajadores;
+
+      // Procesar trabajadores con sus servicios
+      const trabajadoresProcesados = (trabajadoresData || []).map((t: any) => ({
+        id: t.id,
+        nombre: t.nombre,
+        servicios: t.servicios ? 
+          t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
+          : [],
+        festivos: t.festivos || [],
+        limiteDiasReserva: t.duracionCitaDefecto || 30,
+        user_id: t.user_id
+      }));
+
+      setTrabajadores(trabajadoresProcesados);
+      
+      // Inicializar estados para cada trabajador
+      trabajadoresProcesados.forEach((t: Trabajador) => inicializarEstadosTrabajador(t.id));
+      
+      if (trabajadoresProcesados.length > 0 && !trabajadorExpandido) {
+        setTrabajadorExpandido(trabajadoresProcesados[0].id);
+      }
+
+    } catch (error) {
+      console.error('Error cargando datos:', error);
+      showMessage('Error cargando configuración');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const inicializarEstadosTrabajador = (trabajadorId: string) => {
     setNuevosServicios(prev => ({
       ...prev,
       [trabajadorId]: prev[trabajadorId] || { nombre: "", duracion: 20, precio: 0, mostrarPrecio: true }
@@ -73,122 +126,254 @@ export default function Configuracion() {
     }));
   };
 
-  useEffect(() => {
-    trabajadores.forEach(t => inicializarEstadosTrabajador(t.id));
-  }, [trabajadores]);
-
-  const agregarTrabajador = () => {
-    if (!nuevoTrabajador.trim()) return;
+  const agregarTrabajador = async () => {
+    if (!nuevoTrabajador.trim() || !user) return;
     
-    const nuevoId = Math.max(...trabajadores.map(t => t.id), 0) + 1;
-    const nuevoTrab: Trabajador = {
-      id: nuevoId,
-      nombre: nuevoTrabajador,
-      servicios: [],
-      festivos: [],
-      limiteDiasReserva: 30
-    };
-    
-    setTrabajadores([...trabajadores, nuevoTrab]);
-    setNuevoTrabajador("");
-    setTrabajadorExpandido(nuevoId);
-    inicializarEstadosTrabajador(nuevoId);
-    showMessage("Trabajador agregado exitosamente");
-  };
+    try {
+      const { data, error } = await supabase
+        .from('trabajadores')
+        .insert([{
+          nombre: nuevoTrabajador,
+          servicios: [],
+          festivos: [],
+          duracionCitaDefecto: 30,
+          user_id: user.id
+        }])
+        .select()
+        .single();
 
-  const eliminarTrabajador = (id: number) => {
-    setTrabajadores(trabajadores.filter(t => t.id !== id));
-    if (trabajadorExpandido === id) {
-      setTrabajadorExpandido(trabajadores[0]?.id || null);
+      if (error) throw error;
+
+      const nuevoTrab: Trabajador = {
+        id: data.id,
+        nombre: data.nombre,
+        servicios: [],
+        festivos: [],
+        limiteDiasReserva: 30,
+        user_id: data.user_id
+      };
+      
+      setTrabajadores([...trabajadores, nuevoTrab]);
+      setNuevoTrabajador("");
+      setTrabajadorExpandido(data.id);
+      inicializarEstadosTrabajador(data.id);
+      showMessage("Trabajador agregado exitosamente");
+    } catch (error) {
+      console.error('Error agregando trabajador:', error);
+      showMessage("Error agregando trabajador");
     }
-    showMessage("Trabajador eliminado");
   };
 
-  const agregarServicio = (trabajadorId: number) => {
+  const eliminarTrabajador = async (id: string) => {
+    if (!user) return;
+    
+    try {
+      const { error } = await supabase
+        .from('trabajadores')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.filter(t => t.id !== id));
+      if (trabajadorExpandido === id) {
+        setTrabajadorExpandido(trabajadores[0]?.id || null);
+      }
+      showMessage("Trabajador eliminado");
+    } catch (error) {
+      console.error('Error eliminando trabajador:', error);
+      showMessage("Error eliminando trabajador");
+    }
+  };
+
+  const agregarServicio = async (trabajadorId: string) => {
     const nuevoServicio = nuevosServicios[trabajadorId];
-    if (!nuevoServicio?.nombre.trim()) return;
+    if (!nuevoServicio?.nombre.trim() || !user) return;
     
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        const nuevoId = Math.max(...t.servicios.map(s => s.id), 0) + 1;
-        return {
-          ...t,
-          servicios: [...t.servicios, { ...nuevoServicio, id: nuevoId }]
-        };
-      }
-      return t;
-    }));
-    
-    setNuevosServicios(prev => ({
-      ...prev,
-      [trabajadorId]: { nombre: "", duracion: 20, precio: 0, mostrarPrecio: true }
-    }));
-    
-    showMessage("Servicio agregado exitosamente");
-  };
+    try {
+      // Insertar servicio en tabla servicios
+      const { data: servicioData, error: errorServicio } = await supabase
+        .from('servicios')
+        .insert([{
+          nombre: nuevoServicio.nombre,
+          duracion: nuevoServicio.duracion,
+          precio: nuevoServicio.precio,
+          user_id: user.id
+        }])
+        .select()
+        .single();
 
-  const eliminarServicio = (trabajadorId: number, servicioId: number) => {
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return {
-          ...t,
-          servicios: t.servicios.filter(s => s.id !== servicioId)
-        };
-      }
-      return t;
-    }));
-    showMessage("Servicio eliminado");
-  };
+      if (errorServicio) throw errorServicio;
 
-  const agregarFestivo = (trabajadorId: number) => {
-    const nuevaFecha = nuevasFechasFestivas[trabajadorId];
-    if (!nuevaFecha) return;
-    
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        if (t.festivos.includes(nuevaFecha)) {
-          showMessage("Esta fecha ya está marcada como festiva");
+      // Actualizar servicios globales
+      setServiciosGlobales([...serviciosGlobales, servicioData]);
+
+      // Agregar servicio al trabajador
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (trabajador) {
+        const serviciosActualizados = [...(trabajador.servicios || []), servicioData];
+        const servicioIds = serviciosActualizados.map(s => s.id);
+
+        const { error: errorTrabajador } = await supabase
+          .from('trabajadores')
+          .update({ servicios: servicioIds })
+          .eq('id', trabajadorId)
+          .eq('user_id', user.id);
+
+        if (errorTrabajador) throw errorTrabajador;
+
+        // Actualizar estado local
+        setTrabajadores(trabajadores.map(t => {
+          if (t.id === trabajadorId) {
+            return { ...t, servicios: serviciosActualizados };
+          }
           return t;
+        }));
+      }
+      
+      setNuevosServicios(prev => ({
+        ...prev,
+        [trabajadorId]: { nombre: "", duracion: 20, precio: 0, mostrarPrecio: true }
+      }));
+      
+      showMessage("Servicio agregado exitosamente");
+    } catch (error) {
+      console.error('Error agregando servicio:', error);
+      showMessage("Error agregando servicio");
+    }
+  };
+
+  const eliminarServicio = async (trabajadorId: string, servicioId: number) => {
+    if (!user) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      const serviciosActualizados = trabajador.servicios.filter(s => s.id !== servicioId);
+      const servicioIds = serviciosActualizados.map(s => s.id);
+
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ servicios: servicioIds })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, servicios: serviciosActualizados };
         }
-        return {
-          ...t,
-          festivos: [...t.festivos, nuevaFecha].sort()
-        };
-      }
-      return t;
-    }));
+        return t;
+      }));
+      
+      showMessage("Servicio eliminado del trabajador");
+    } catch (error) {
+      console.error('Error eliminando servicio:', error);
+      showMessage("Error eliminando servicio");
+    }
+  };
+
+  const agregarFestivo = async (trabajadorId: string) => {
+    const nuevaFecha = nuevasFechasFestivas[trabajadorId];
+    if (!nuevaFecha || !user) return;
     
-    setNuevasFechasFestivas(prev => ({
-      ...prev,
-      [trabajadorId]: ""
-    }));
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      if (trabajador.festivos.includes(nuevaFecha)) {
+        showMessage("Esta fecha ya está marcada como festiva");
+        return;
+      }
+
+      const festivosActualizados = [...trabajador.festivos, nuevaFecha].sort();
+
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ festivos: festivosActualizados })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, festivos: festivosActualizados };
+        }
+        return t;
+      }));
+      
+      setNuevasFechasFestivas(prev => ({
+        ...prev,
+        [trabajadorId]: ""
+      }));
+      
+      showMessage("Día festivo agregado");
+    } catch (error) {
+      console.error('Error agregando festivo:', error);
+      showMessage("Error agregando día festivo");
+    }
+  };
+
+  const eliminarFestivo = async (trabajadorId: string, fecha: string) => {
+    if (!user) return;
     
-    showMessage("Día festivo agregado");
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      const festivosActualizados = trabajador.festivos.filter(f => f !== fecha);
+
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ festivos: festivosActualizados })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, festivos: festivosActualizados };
+        }
+        return t;
+      }));
+      
+      showMessage("Día festivo eliminado");
+    } catch (error) {
+      console.error('Error eliminando festivo:', error);
+      showMessage("Error eliminando día festivo");
+    }
   };
 
-  const eliminarFestivo = (trabajadorId: number, fecha: string) => {
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return {
-          ...t,
-          festivos: t.festivos.filter(f => f !== fecha)
-        };
-      }
-      return t;
-    }));
-    showMessage("Día festivo eliminado");
+  const actualizarLimiteDias = async (trabajadorId: string, limite: number) => {
+    if (!user) return;
+    
+    try {
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ duracionCitaDefecto: limite })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, limiteDiasReserva: limite };
+        }
+        return t;
+      }));
+    } catch (error) {
+      console.error('Error actualizando límite:', error);
+      showMessage("Error actualizando límite de días");
+    }
   };
 
-  const actualizarLimiteDias = (trabajadorId: number, limite: number) => {
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return { ...t, limiteDiasReserva: limite };
-      }
-      return t;
-    }));
-  };
-
-  const actualizarNuevoServicio = (trabajadorId: number, campo: keyof NuevoServicio, valor: string | number | boolean) => {
+  const actualizarNuevoServicio = (trabajadorId: string, campo: keyof NuevoServicio, valor: string | number | boolean) => {
     setNuevosServicios(prev => ({
       ...prev,
       [trabajadorId]: {
@@ -208,12 +393,11 @@ export default function Configuracion() {
 
   const guardarConfiguracion = async (): Promise<void> => {
     setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
     showMessage("Configuración guardada exitosamente");
     setIsLoading(false);
   };
 
-  const toggleTrabajador = (id: number) => {
+  const toggleTrabajador = (id: string) => {
     setTrabajadorExpandido(trabajadorExpandido === id ? null : id);
   };
 
@@ -222,6 +406,17 @@ export default function Configuracion() {
       action();
     }
   };
+
+  if (isLoading && trabajadores.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Cargando configuración...</p>
+        </div>
+      </div>
+    );
+  }
 
   const totalServicios = trabajadores.reduce((total, t) => total + t.servicios.length, 0);
   const totalFestivos = trabajadores.reduce((total, t) => total + t.festivos.length, 0);
@@ -241,6 +436,9 @@ export default function Configuracion() {
             <div>
               <h1 className="text-xl sm:text-3xl font-bold text-gray-800">Configuración del Negocio</h1>
               <p className="text-sm sm:text-base text-gray-600 mt-1">Gestiona tu equipo, servicios y disponibilidad</p>
+              {user && (
+                <p className="text-xs text-blue-600 mt-1">Usuario: {user.email}</p>
+              )}
             </div>
           </div>
         </div>
@@ -268,7 +466,8 @@ export default function Configuracion() {
             />
             <button 
               onClick={agregarTrabajador}
-              className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+              disabled={isLoading}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center justify-center gap-2 transition-colors whitespace-nowrap disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               Añadir Trabajador
@@ -376,7 +575,8 @@ export default function Configuracion() {
                           </div>
                           <button 
                             onClick={() => agregarServicio(trabajador.id)}
-                            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm sm:text-base"
+                            disabled={isLoading}
+                            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm sm:text-base disabled:opacity-50"
                             type="button"
                           >
                             <Plus className="w-4 h-4" />
@@ -430,7 +630,8 @@ export default function Configuracion() {
                           />
                           <button 
                             onClick={() => agregarFestivo(trabajador.id)}
-                            className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm sm:text-base whitespace-nowrap"
+                            disabled={isLoading}
+                            className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm sm:text-base whitespace-nowrap disabled:opacity-50"
                             type="button"
                           >
                             <Plus className="w-4 h-4" />
