@@ -55,9 +55,10 @@ export default function Login() {
           router.push("/configuracion");
         }
       }
-    } catch (error: any) {
-      console.error('Error en login:', error);
-      setError(error.message || "Error al iniciar sesión");
+    } catch (err) {
+      console.error('Error en login:', err);
+      const errorMessage = err instanceof Error ? err.message : "Error al iniciar sesión";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -113,9 +114,10 @@ export default function Login() {
 
         alert("Cuenta creada exitosamente. Ya puedes iniciar sesión.");
       }
-    } catch (error: any) {
-      console.error('Error en registro:', error);
-      setError(error.message || "Error al crear la cuenta");
+    } catch (err) {
+      console.error('Error en registro:', err);
+      const errorMessage = err instanceof Error ? err.message : "Error al crear la cuenta";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -401,7 +403,7 @@ export default function Login() {
 
         <div style={{ textAlign: "center", marginTop: "2rem" }}>
           <p style={{ color: "#6b7280", fontSize: "0.875rem" }}>
-            ¿Primera vez? Usa "Registrarse" para crear tu cuenta
+            ¿Primera vez? Usa &ldquo;Registrarse&rdquo; para crear tu cuenta
           </p>
         </div>
       </div>
