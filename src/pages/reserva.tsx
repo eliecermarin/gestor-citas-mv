@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Clock, User, Mail, Phone, Scissors, Check, AlertCircle, Loader2, Edit3, X } from 'lucide-react';
-import { supabase } from '../lib/supabaseclient';
+import { supabase } from "../supabaseClient"; // ← SOLO ESTE CAMBIO
 import { useRouter } from 'next/router';
 
 interface FormData {

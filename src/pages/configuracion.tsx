@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
-import { supabase } from "../lib/supabaseclient";
+import { supabase } from "../supabaseClient"; // ← SOLO ESTE CAMBIO
 import { useRouter } from "next/router";
 
 interface Servicio {

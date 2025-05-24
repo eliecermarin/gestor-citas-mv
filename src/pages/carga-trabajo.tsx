@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X, AlertCircle } from "lucide-react";
-import { supabase } from "../lib/supabaseclient";
+import { supabase } from "../supabaseClient"; // ← SOLO ESTE CAMBIO
 import { useRouter } from "next/router";
 
 const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
