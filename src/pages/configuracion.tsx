@@ -185,7 +185,7 @@ export default function Configuracion() {
     console.error('❌ Error completo:', error);
     showMessage(`Error: ${error.message || 'Error desconocido'}`);
   }
-
+};
 
   const eliminarTrabajador = async (id: string) => {
     if (!user) return;
