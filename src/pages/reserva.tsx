@@ -88,7 +88,7 @@ const ReservationSystem = () => {
   };
 
   // Simulación de envío a Supabase
-  const submitReservation = async (data) => {
+  const submitReservation = async () => {
     // Aquí irá la lógica real de Supabase
     // const { data: result, error } = await supabase
     //   .from('reservations')
@@ -142,13 +142,7 @@ const ReservationSystem = () => {
     setIsSubmitting(true);
 
     try {
-      const reservationData = {
-        ...formData,
-        created_at: new Date().toISOString(),
-        status: 'pending'
-      };
-
-      await submitReservation(reservationData);
+      await submitReservation();
       setReservationConfirmed(true);
 
     } catch (error) {
