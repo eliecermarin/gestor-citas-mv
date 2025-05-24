@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Clock, User, Mail, Phone, Scissors, Check, AlertCircle, Loader2, Edit3, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseclient';
 import { useRouter } from 'next/router';
@@ -34,6 +34,20 @@ interface BusinessConfig {
   dias_reserva_max: number;
 }
 
+interface TrabajadorData {
+  id: string;
+  nombre: string;
+  servicios: number[];
+  festivos: string[];
+  duracionCitaDefecto: number;
+}
+
+interface ReservationData {
+  trabajador: string;
+  fecha: string;
+  hora: string;
+}
+
 const ReservationSystem = ({ businessId }: { businessId?: string }) => {
   const router = useRouter();
   
@@ -58,7 +72,7 @@ const ReservationSystem = ({ businessId }: { businessId?: string }) => {
   const [services, setServices] = useState<Servicio[]>([]);
   const [workers, setWorkers] = useState<Trabajador[]>([]);
   const [businessConfig, setBusinessConfig] = useState<BusinessConfig | null>(null);
-  const [existingReservations, setExistingReservations] = useState<any[]>([]);
+  const [existingReservations, setExistingReservations] = useState<ReservationData[]>([]);
   const [currentBusinessId, setCurrentBusinessId] = useState<string | null>(null);
 
   // Obtener el businessId del usuario actual o usar el prop
@@ -127,7 +141,7 @@ const ReservationSystem = ({ businessId }: { businessId?: string }) => {
           console.error('Error cargando trabajadores:', workersError);
         } else {
           // Procesar trabajadores con sus servicios
-          const processedWorkers = (workersData || []).map((worker: any) => ({
+          const processedWorkers = (workersData || []).map((worker: TrabajadorData) => ({
             ...worker,
             servicios: worker.servicios || [],
             festivos: worker.festivos || []
@@ -158,11 +172,7 @@ const ReservationSystem = ({ businessId }: { businessId?: string }) => {
   }, [currentBusinessId]);
 
   // Generar horarios disponibles basados en trabajador y fecha seleccionada
-  useEffect(() => {
-    generateAvailableTimes();
-  }, [formData.worker, formData.date, existingReservations]);
-
-  const generateAvailableTimes = () => {
+  const generateAvailableTimes = useCallback(() => {
     if (!formData.worker || !formData.date) {
       setAvailableTimes([]);
       return;
@@ -175,7 +185,6 @@ const ReservationSystem = ({ businessId }: { businessId?: string }) => {
     }
 
     // Verificar si la fecha es un día festivo para el trabajador
-    const selectedDate = new Date(formData.date);
     const dateString = formData.date;
     
     if (selectedWorker.festivos && selectedWorker.festivos.includes(dateString)) {
@@ -204,7 +213,11 @@ const ReservationSystem = ({ businessId }: { businessId?: string }) => {
     }
 
     setAvailableTimes(slots);
-  };
+  }, [formData.worker, formData.date, existingReservations, workers]);
+
+  useEffect(() => {
+    generateAvailableTimes();
+  }, [generateAvailableTimes]);
 
   // Obtener servicios disponibles para el trabajador seleccionado
   const getAvailableServices = () => {

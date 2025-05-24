@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
 import { supabase } from "../lib/supabaseclient";
 import { useRouter } from "next/router";
@@ -28,9 +28,23 @@ interface NuevoServicio {
   mostrarPrecio: boolean;
 }
 
+interface User {
+  id: string;
+  email?: string;
+}
+
+interface TrabajadorData {
+  id: string;
+  nombre: string;
+  servicios: number[];
+  festivos: string[];
+  duracionCitaDefecto: number;
+  user_id: string;
+}
+
 export default function Configuracion() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
   const [serviciosGlobales, setServiciosGlobales] = useState<Servicio[]>([]);
   const [nuevoTrabajador, setNuevoTrabajador] = useState<string>("");
@@ -45,27 +59,7 @@ export default function Configuracion() {
     setTimeout(() => setMessage(""), 3000);
   };
 
-  // Verificar autenticación y cargar datos
-  useEffect(() => {
-    const checkAuthAndLoadData = async () => {
-      try {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (currentUser) {
-          setUser(currentUser);
-          await cargarDatos(currentUser.id);
-        } else {
-          router.push('/login');
-        }
-      } catch (error) {
-        console.error('Error de autenticación:', error);
-        router.push('/login');
-      }
-    };
-
-    checkAuthAndLoadData();
-  }, [router]);
-
-  const cargarDatos = async (userId: string) => {
+  const cargarDatos = useCallback(async (userId: string) => {
     setIsLoading(true);
     try {
       // Cargar servicios globales
@@ -86,7 +80,7 @@ export default function Configuracion() {
       if (errorTrabajadores) throw errorTrabajadores;
 
       // Procesar trabajadores con sus servicios
-      const trabajadoresProcesados = (trabajadoresData || []).map((t: any) => ({
+      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => ({
         id: t.id,
         nombre: t.nombre,
         servicios: t.servicios ? 
@@ -112,7 +106,27 @@ export default function Configuracion() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [trabajadorExpandido]);
+
+  // Verificar autenticación y cargar datos
+  useEffect(() => {
+    const checkAuthAndLoadData = async () => {
+      try {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+          setUser(currentUser);
+          await cargarDatos(currentUser.id);
+        } else {
+          router.push('/login');
+        }
+      } catch (error) {
+        console.error('Error de autenticación:', error);
+        router.push('/login');
+      }
+    };
+
+    checkAuthAndLoadData();
+  }, [router, cargarDatos]);
 
   const inicializarEstadosTrabajador = (trabajadorId: string) => {
     setNuevosServicios(prev => ({

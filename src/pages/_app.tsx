@@ -5,10 +5,15 @@ import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseclient'
 import '../styles/globals.css'
 
+interface User {
+  id: string;
+  email?: string;
+}
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
 
   useEffect(() => {
     // Verificar sesión inicial
