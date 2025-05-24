@@ -141,42 +141,51 @@ export default function Configuracion() {
   };
 
   const agregarTrabajador = async () => {
-    if (!nuevoTrabajador.trim() || !user) return;
+  if (!nuevoTrabajador.trim() || !user) return;
+  
+  try {
+    console.log('🔄 Intentando crear trabajador:', nuevoTrabajador);
     
-    try {
-      const { data, error } = await supabase
-        .from('trabajadores')
-        .insert([{
-          nombre: nuevoTrabajador,
-          servicios: [],
-          festivos: [],
-          duracionCitaDefecto: 30,
-          user_id: user.id
-        }])
-        .select()
-        .single();
+    // 🔥 SOLO CAMPOS BÁSICOS QUE EXISTEN
+    const trabajadorData = {
+      nombre: nuevoTrabajador.trim(),
+      servicios: [],
+      festivos: [],
+      duracionCitaDefecto: 30,
+      user_id: user.id
+    };
 
-      if (error) throw error;
+    const { data, error } = await supabase
+      .from('trabajadores')
+      .insert([trabajadorData])
+      .select()
+      .single();
 
-      const nuevoTrab: Trabajador = {
-        id: data.id,
-        nombre: data.nombre,
-        servicios: [],
-        festivos: [],
-        limiteDiasReserva: 30,
-        user_id: data.user_id
-      };
-      
-      setTrabajadores([...trabajadores, nuevoTrab]);
-      setNuevoTrabajador("");
-      setTrabajadorExpandido(data.id);
-      inicializarEstadosTrabajador(data.id);
-      showMessage("Trabajador agregado exitosamente");
-    } catch (error) {
-      console.error('Error agregando trabajador:', error);
-      showMessage("Error agregando trabajador - Verifica permisos de base de datos");
+    if (error) {
+      console.error('❌ Error:', error);
+      throw error;
     }
-  };
+
+    const nuevoTrab = {
+      id: data.id,
+      nombre: data.nombre,
+      servicios: [],
+      festivos: data.festivos || [],
+      limiteDiasReserva: data.duracionCitaDefecto || 30,
+      user_id: data.user_id
+    };
+    
+    setTrabajadores([...trabajadores, nuevoTrab]);
+    setNuevoTrabajador("");
+    setTrabajadorExpandido(data.id);
+    inicializarEstadosTrabajador(data.id);
+    showMessage("Trabajador agregado exitosamente");
+
+  } catch (error: any) {
+    console.error('❌ Error completo:', error);
+    showMessage(`Error: ${error.message || 'Error desconocido'}`);
+  }
+
 
   const eliminarTrabajador = async (id: string) => {
     if (!user) return;
