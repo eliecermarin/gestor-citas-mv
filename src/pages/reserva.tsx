@@ -88,11 +88,11 @@ const ReservationSystem = () => {
   };
 
   // Simulación de envío a Supabase
-  const submitReservation = async (reservationData) => {
+  const submitReservation = async (data) => {
     // Aquí irá la lógica real de Supabase
-    // const { data, error } = await supabase
+    // const { data: result, error } = await supabase
     //   .from('reservations')
-    //   .insert([reservationData]);
+    //   .insert([data]);
     
     // Para conectar con Supabase real, descomenta lo siguiente:
     /*
@@ -102,22 +102,22 @@ const ReservationSystem = () => {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     );
     
-    const { data, error } = await supabase
+    const { data: result, error } = await supabase
       .from(&apos;reservations&apos;)
       .insert([{
-        name: reservationData.name,
-        email: reservationData.email,
-        phone: reservationData.phone,
-        reservation_date: reservationData.date,
-        reservation_time: reservationData.time,
-        service_type: reservationData.service,
-        notes: reservationData.notes,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        reservation_date: data.date,
+        reservation_time: data.time,
+        service_type: data.service,
+        notes: data.notes,
         status: &apos;pending&apos;,
         created_at: new Date().toISOString()
       }]);
       
     if (error) throw error;
-    return { success: true, data };
+    return { success: true, data: result };
     */
     
     // Simulación de API call
