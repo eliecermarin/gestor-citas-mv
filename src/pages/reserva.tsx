@@ -2,7 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, User, Mail, Phone, Scissors, Check, AlertCircle, Loader2, Edit3, X } from 'lucide-react';
 
 const ReservationSystem = () => {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    date: string;
+    time: string;
+    service: string;
+    notes: string;
+  }>({
     name: '',
     email: '',
     phone: '',
@@ -12,13 +20,13 @@ const ReservationSystem = () => {
     notes: ''
   });
 
-  const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [reservationConfirmed, setReservationConfirmed] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [reservationConfirmed, setReservationConfirmed] = useState<boolean>(false);
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
 
   // Servicios disponibles - esto vendrá de Supabase
-  const services = [
+  const services: Array<{id: string, name: string, duration: number, price: number}> = [
     { id: 'corte-pelo', name: 'Corte de Pelo', duration: 30, price: 25 },
     { id: 'tinte', name: 'Tinte', duration: 90, price: 45 },
     { id: 'peinado', name: 'Peinado', duration: 45, price: 35 },
@@ -43,7 +51,7 @@ const ReservationSystem = () => {
 
   // Validación de formulario
   const validateForm = () => {
-    const newErrors = {};
+    const newErrors: Record<string, string> = {};
 
     if (!formData.name.trim()) newErrors.name = 'El nombre es requerido';
     if (!formData.email.trim()) {
@@ -70,7 +78,7 @@ const ReservationSystem = () => {
   };
 
   // Manejo de cambios en el formulario
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     
     setFormData(prev => ({
@@ -161,7 +169,7 @@ const ReservationSystem = () => {
 
   // Obtener servicio seleccionado
   const getSelectedService = () => {
-    return services.find(s => s.id === formData.service);
+    return services.find(s => s.id === formData.service) || null;
   };
 
   // Editar reserva (mantener datos)
@@ -201,7 +209,7 @@ const ReservationSystem = () => {
             <div className="space-y-3 text-left">
               <div className="flex justify-between">
                 <span className="text-gray-600">Servicio:</span>
-                <span className="font-medium">{getSelectedService()?.name}</span>
+                <span className="font-medium">{getSelectedService()?.name || 'No seleccionado'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Fecha:</span>
