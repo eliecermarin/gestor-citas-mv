@@ -1,8 +1,31 @@
 import { useEffect, useState } from "react";
 import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
 
+interface Servicio {
+  id: number;
+  nombre: string;
+  duracion: number;
+  precio: number;
+  mostrarPrecio: boolean;
+}
+
+interface Trabajador {
+  id: number;
+  nombre: string;
+  servicios: Servicio[];
+  festivos: string[];
+  limiteDiasReserva: number;
+}
+
+interface NuevoServicio {
+  nombre: string;
+  duracion: number;
+  precio: number;
+  mostrarPrecio: boolean;
+}
+
 export default function Configuracion() {
-  const [trabajadores, setTrabajadores] = useState([
+  const [trabajadores, setTrabajadores] = useState<Trabajador[]>([
     {
       id: 1,
       nombre: "María García",
@@ -25,33 +48,29 @@ export default function Configuracion() {
     }
   ]);
 
-  const [nuevoTrabajador, setNuevoTrabajador] = useState("");
-  const [trabajadorExpandido, setTrabajadorExpandido] = useState(1);
-  const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [nuevoTrabajador, setNuevoTrabajador] = useState<string>("");
+  const [trabajadorExpandido, setTrabajadorExpandido] = useState<number | null>(1);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [message, setMessage] = useState<string>("");
 
-  // Estados para cada trabajador
-  const [nuevosServicios, setNuevosServicios] = useState({});
-  const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState({});
+  const [nuevosServicios, setNuevosServicios] = useState<Record<number, NuevoServicio>>({});
+  const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState<Record<number, string>>({});
 
-  const showMessage = (msg, type = "success") => {
+  const showMessage = (msg: string) => {
     setMessage(msg);
     setTimeout(() => setMessage(""), 3000);
   };
 
-  const inicializarEstadosTrabajador = (trabajadorId) => {
-    if (!nuevosServicios[trabajadorId]) {
-      setNuevosServicios(prev => ({
-        ...prev,
-        [trabajadorId]: { nombre: "", duracion: 20, precio: 0, mostrarPrecio: true }
-      }));
-    }
-    if (!nuevasFechasFestivas[trabajadorId]) {
-      setNuevasFechasFestivas(prev => ({
-        ...prev,
-        [trabajadorId]: ""
-      }));
-    }
+  const inicializarEstadosTrabajador = (trabajadorId: number) => {
+    setNuevosServicios(prev => ({
+      ...prev,
+      [trabajadorId]: prev[trabajadorId] || { nombre: "", duracion: 20, precio: 0, mostrarPrecio: true }
+    }));
+    
+    setNuevasFechasFestivas(prev => ({
+      ...prev,
+      [trabajadorId]: prev[trabajadorId] || ""
+    }));
   };
 
   useEffect(() => {
@@ -62,7 +81,7 @@ export default function Configuracion() {
     if (!nuevoTrabajador.trim()) return;
     
     const nuevoId = Math.max(...trabajadores.map(t => t.id), 0) + 1;
-    const nuevoTrab = {
+    const nuevoTrab: Trabajador = {
       id: nuevoId,
       nombre: nuevoTrabajador,
       servicios: [],
@@ -77,7 +96,7 @@ export default function Configuracion() {
     showMessage("Trabajador agregado exitosamente");
   };
 
-  const eliminarTrabajador = (id) => {
+  const eliminarTrabajador = (id: number) => {
     setTrabajadores(trabajadores.filter(t => t.id !== id));
     if (trabajadorExpandido === id) {
       setTrabajadorExpandido(trabajadores[0]?.id || null);
@@ -85,7 +104,7 @@ export default function Configuracion() {
     showMessage("Trabajador eliminado");
   };
 
-  const agregarServicio = (trabajadorId) => {
+  const agregarServicio = (trabajadorId: number) => {
     const nuevoServicio = nuevosServicios[trabajadorId];
     if (!nuevoServicio?.nombre.trim()) return;
     
@@ -108,7 +127,7 @@ export default function Configuracion() {
     showMessage("Servicio agregado exitosamente");
   };
 
-  const eliminarServicio = (trabajadorId, servicioId) => {
+  const eliminarServicio = (trabajadorId: number, servicioId: number) => {
     setTrabajadores(trabajadores.map(t => {
       if (t.id === trabajadorId) {
         return {
@@ -121,14 +140,14 @@ export default function Configuracion() {
     showMessage("Servicio eliminado");
   };
 
-  const agregarFestivo = (trabajadorId) => {
+  const agregarFestivo = (trabajadorId: number) => {
     const nuevaFecha = nuevasFechasFestivas[trabajadorId];
     if (!nuevaFecha) return;
     
     setTrabajadores(trabajadores.map(t => {
       if (t.id === trabajadorId) {
         if (t.festivos.includes(nuevaFecha)) {
-          showMessage("Esta fecha ya está marcada como festiva", "error");
+          showMessage("Esta fecha ya está marcada como festiva");
           return t;
         }
         return {
@@ -147,7 +166,7 @@ export default function Configuracion() {
     showMessage("Día festivo agregado");
   };
 
-  const eliminarFestivo = (trabajadorId, fecha) => {
+  const eliminarFestivo = (trabajadorId: number, fecha: string) => {
     setTrabajadores(trabajadores.map(t => {
       if (t.id === trabajadorId) {
         return {
@@ -160,7 +179,7 @@ export default function Configuracion() {
     showMessage("Día festivo eliminado");
   };
 
-  const actualizarLimiteDias = (trabajadorId, limite) => {
+  const actualizarLimiteDias = (trabajadorId: number, limite: number) => {
     setTrabajadores(trabajadores.map(t => {
       if (t.id === trabajadorId) {
         return { ...t, limiteDiasReserva: limite };
@@ -169,7 +188,7 @@ export default function Configuracion() {
     }));
   };
 
-  const actualizarNuevoServicio = (trabajadorId, campo, valor) => {
+  const actualizarNuevoServicio = (trabajadorId: number, campo: keyof NuevoServicio, valor: string | number | boolean) => {
     setNuevosServicios(prev => ({
       ...prev,
       [trabajadorId]: {
@@ -179,7 +198,7 @@ export default function Configuracion() {
     }));
   };
 
-  const formatearFecha = (fecha) => {
+  const formatearFecha = (fecha: string): string => {
     return new Date(fecha).toLocaleDateString('es-ES', {
       day: 'numeric',
       month: 'long',
@@ -187,19 +206,28 @@ export default function Configuracion() {
     });
   };
 
-  const guardarConfiguracion = async () => {
+  const guardarConfiguracion = async (): Promise<void> => {
     setIsLoading(true);
     await new Promise(resolve => setTimeout(resolve, 1000));
     showMessage("Configuración guardada exitosamente");
     setIsLoading(false);
   };
 
-  const toggleTrabajador = (id) => {
+  const toggleTrabajador = (id: number) => {
     setTrabajadorExpandido(trabajadorExpandido === id ? null : id);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>, action: () => void) => {
+    if (e.key === 'Enter') {
+      action();
+    }
   };
 
   const totalServicios = trabajadores.reduce((total, t) => total + t.servicios.length, 0);
   const totalFestivos = trabajadores.reduce((total, t) => total + t.festivos.length, 0);
+  const promedioLimite = trabajadores.length > 0 
+    ? Math.round(trabajadores.reduce((sum, t) => sum + t.limiteDiasReserva, 0) / trabajadores.length) 
+    : 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-2 sm:p-4">
@@ -236,7 +264,7 @@ export default function Configuracion() {
               onChange={(e) => setNuevoTrabajador(e.target.value)}
               placeholder="Nombre del trabajador"
               className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              onKeyPress={(e) => e.key === 'Enter' && agregarTrabajador()}
+              onKeyPress={(e) => handleKeyPress(e, agregarTrabajador)}
             />
             <button 
               onClick={agregarTrabajador}
@@ -276,6 +304,7 @@ export default function Configuracion() {
                         eliminarTrabajador(trabajador.id);
                       }}
                       className="text-white hover:text-red-200 p-2 rounded-lg hover:bg-white hover:bg-opacity-20 transition-colors"
+                      aria-label={`Eliminar trabajador ${trabajador.nombre}`}
                     >
                       <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
@@ -312,9 +341,10 @@ export default function Configuracion() {
                               <input
                                 type="number"
                                 value={nuevosServicios[trabajador.id]?.duracion || 20}
-                                onChange={(e) => actualizarNuevoServicio(trabajador.id, 'duracion', +e.target.value)}
+                                onChange={(e) => actualizarNuevoServicio(trabajador.id, 'duracion', parseInt(e.target.value) || 0)}
                                 placeholder="Duración"
                                 className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-12 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all text-sm sm:text-base"
+                                min="1"
                               />
                               <span className="absolute right-3 top-2 text-gray-500 text-sm">min</span>
                             </div>
@@ -322,9 +352,11 @@ export default function Configuracion() {
                               <input
                                 type="number"
                                 value={nuevosServicios[trabajador.id]?.precio || 0}
-                                onChange={(e) => actualizarNuevoServicio(trabajador.id, 'precio', +e.target.value)}
+                                onChange={(e) => actualizarNuevoServicio(trabajador.id, 'precio', parseFloat(e.target.value) || 0)}
                                 placeholder="Precio"
                                 className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-8 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all text-sm sm:text-base"
+                                min="0"
+                                step="0.01"
                               />
                               <span className="absolute right-3 top-2 text-gray-500 text-sm">€</span>
                             </div>
@@ -332,7 +364,8 @@ export default function Configuracion() {
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => actualizarNuevoServicio(trabajador.id, 'mostrarPrecio', !nuevosServicios[trabajador.id]?.mostrarPrecio)}
-                              className="flex items-center gap-2 text-sm text-gray-600"
+                              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+                              type="button"
                             >
                               {nuevosServicios[trabajador.id]?.mostrarPrecio ? 
                                 <Eye className="w-4 h-4" /> : 
@@ -344,6 +377,7 @@ export default function Configuracion() {
                           <button 
                             onClick={() => agregarServicio(trabajador.id)}
                             className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm sm:text-base"
+                            type="button"
                           >
                             <Plus className="w-4 h-4" />
                             Añadir Servicio
@@ -354,7 +388,7 @@ export default function Configuracion() {
                       {/* Lista de Servicios */}
                       <div className="space-y-2 max-h-60 overflow-y-auto">
                         {trabajador.servicios.map((servicio) => (
-                          <div key={servicio.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div key={`servicio-${trabajador.id}-${servicio.id}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                             <div>
                               <h5 className="font-medium text-gray-800 text-sm sm:text-base">{servicio.nombre}</h5>
                               <p className="text-xs sm:text-sm text-gray-600">
@@ -365,6 +399,8 @@ export default function Configuracion() {
                             <button 
                               onClick={() => eliminarServicio(trabajador.id, servicio.id)}
                               className="text-red-500 hover:text-red-700 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                              aria-label={`Eliminar servicio ${servicio.nombre}`}
+                              type="button"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -395,6 +431,7 @@ export default function Configuracion() {
                           <button 
                             onClick={() => agregarFestivo(trabajador.id)}
                             className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm sm:text-base whitespace-nowrap"
+                            type="button"
                           >
                             <Plus className="w-4 h-4" />
                             Añadir
@@ -404,11 +441,13 @@ export default function Configuracion() {
 
                       <div className="space-y-2 max-h-40 overflow-y-auto mb-6">
                         {trabajador.festivos.map((fecha) => (
-                          <div key={fecha} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div key={`festivo-${trabajador.id}-${fecha}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                             <span className="text-sm sm:text-base text-gray-800">{formatearFecha(fecha)}</span>
                             <button 
                               onClick={() => eliminarFestivo(trabajador.id, fecha)}
                               className="text-red-500 hover:text-red-700 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                              aria-label={`Eliminar fecha festiva ${formatearFecha(fecha)}`}
+                              type="button"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -423,13 +462,14 @@ export default function Configuracion() {
                       </h4>
                       
                       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label htmlFor={`limite-${trabajador.id}`} className="block text-sm font-medium text-gray-700 mb-2">
                           Días de antelación máximos
                         </label>
                         <input
+                          id={`limite-${trabajador.id}`}
                           type="number"
                           value={trabajador.limiteDiasReserva}
-                          onChange={(e) => actualizarLimiteDias(trabajador.id, +e.target.value)}
+                          onChange={(e) => actualizarLimiteDias(trabajador.id, parseInt(e.target.value) || 1)}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all text-sm sm:text-base"
                           min="1"
                           max="365"
@@ -463,9 +503,7 @@ export default function Configuracion() {
               <div className="text-xs sm:text-sm text-purple-800">Días Festivos</div>
             </div>
             <div className="text-center p-3 bg-orange-50 rounded-lg">
-              <div className="text-xl sm:text-2xl font-bold text-orange-600">
-                {trabajadores.length > 0 ? Math.round(trabajadores.reduce((sum, t) => sum + t.limiteDiasReserva, 0) / trabajadores.length) : 0}
-              </div>
+              <div className="text-xl sm:text-2xl font-bold text-orange-600">{promedioLimite}</div>
               <div className="text-xs sm:text-sm text-orange-800">Días promedio</div>
             </div>
           </div>
@@ -477,6 +515,7 @@ export default function Configuracion() {
             onClick={guardarConfiguracion}
             disabled={isLoading}
             className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl flex items-center gap-3 text-base sm:text-lg font-semibold shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            type="button"
           >
             <Save className="w-4 h-4 sm:w-5 sm:h-5" />
             {isLoading ? "Guardando..." : "Guardar Configuración"}
