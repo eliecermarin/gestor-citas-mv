@@ -3,8 +3,7 @@ import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../supabaseClient'
-import '../styles/styles.css'
-// import '../styles/globals.css'  // ← COMENTAR ESTA LÍNEA
+// import '../styles/styles.css'  // COMENTADO TEMPORALMENTE
 
 interface User {
   id: string;
@@ -82,10 +81,18 @@ export default function App({ Component, pageProps }: AppProps) {
   // Mostrar loading mientras verifica autenticación
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando aplicación...</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ 
+            width: '48px', 
+            height: '48px', 
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #3498db',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px'
+          }}></div>
+          <p style={{ color: '#666' }}>Cargando aplicación...</p>
         </div>
       </div>
     )
