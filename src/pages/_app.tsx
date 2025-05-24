@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../supabaseClient'
 import '../styles/globals.css'
+// import '../styles/globals.css'  // ← COMENTAR ESTA LÍNEA
 
 interface User {
   id: string;
