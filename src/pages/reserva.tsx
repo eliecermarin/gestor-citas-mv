@@ -15,7 +15,7 @@ const ReservationSystem = () => {
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [reservationConfirmed, setReservationConfirmed] = useState(false);
-  const [availableTimes, setAvailableTimes] = useState([]);
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
 
   // Servicios disponibles - esto vendrá de Supabase
   const services = [
