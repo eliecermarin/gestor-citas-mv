@@ -1,15 +1,6 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { useRouter } from 'next/router';
-import Link from 'next/link';
-import { 
-  Settings, 
-  Calendar, 
-  LogOut, 
-  Menu, 
-  X, 
-  Home,
-  ClipboardList 
-} from 'lucide-react';
+import { Calendar, Settings, LogOut, Menu, X, User, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabaseclient';
 
 interface LayoutProps {
@@ -17,230 +8,157 @@ interface LayoutProps {
   title?: string;
 }
 
-interface User {
-  id: string;
-  email?: string;
-}
-
 export default function Layout({ children, title = "Sistema de Reservas" }: LayoutProps) {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [businessName, setBusinessName] = useState("");
-
-  useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (currentUser) {
-          setUser(currentUser);
-          
-          // Cargar nombre del negocio
-          const { data: config } = await supabase
-            .from('configuracion')
-            .select('nombre_negocio')
-            .eq('user_id', currentUser.id)
-            .single();
-            
-          if (config?.nombre_negocio) {
-            setBusinessName(config.nombre_negocio);
-          }
-        }
-      } catch (error) {
-        console.error('Error cargando datos del usuario:', error);
-      }
-    };
-
-    loadUserData();
-  }, []);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+      await supabase.auth.signOut();
       router.push('/login');
     } catch (error) {
-      console.error('Error cerrando sesión:', error);
+      console.error('Error al cerrar sesión:', error);
     }
   };
 
-  const menuItems = [
+  const navigation = [
     {
       name: 'Agenda',
-      path: '/carga-trabajo',
+      href: '/carga-trabajo',
       icon: Calendar,
-      description: 'Ver y gestionar citas'
-    },
-    {
-      name: 'Configuración',
-      path: '/configuracion',
-      icon: Settings,
-      description: 'Trabajadores y servicios'
+      current: router.pathname === '/carga-trabajo'
     },
     {
       name: 'Nueva Reserva',
-      path: '/reserva',
-      icon: ClipboardList,
-      description: 'Crear nueva cita'
+      href: '/reserva',
+      icon: Clock,
+      current: router.pathname === '/reserva'
+    },
+    {
+      name: 'Configuración',
+      href: '/configuracion',
+      icon: Settings,
+      current: router.pathname === '/configuracion'
     }
   ];
 
-  const isActivePath = (path: string) => {
-    return router.pathname === path;
+  const NavigationItem = ({ item }: { item: typeof navigation[0] }) => {
+    const Icon = item.icon;
+    return (
+      <a
+        href={item.href}
+        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+          item.current
+            ? 'bg-blue-100 text-blue-700'
+            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        }`}
+        onClick={(e) => {
+          e.preventDefault();
+          router.push(item.href);
+          setSidebarOpen(false);
+        }}
+      >
+        <Icon
+          className={`mr-3 h-5 w-5 flex-shrink-0 ${
+            item.current ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-500'
+          }`}
+          aria-hidden="true"
+        />
+        {item.name}
+      </a>
+    );
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Logo y título */}
-            <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-lg">
-                <Home className="w-6 h-6 text-white" />
+      {/* Mobile sidebar */}
+      <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+        
+        <div className="fixed inset-y-0 left-0 flex w-64 flex-col bg-white shadow-xl">
+          <div className="flex h-16 items-center justify-between px-4 shadow-sm">
+            <div className="flex items-center">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
+                <User className="h-5 w-5 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">
-                  {businessName || "Sistema de Reservas"}
-                </h1>
-                <p className="text-sm text-gray-500 hidden sm:block">
-                  {title}
-                </p>
+              <span className="ml-2 text-lg font-semibold text-gray-900">Panel</span>
+            </div>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+          
+          <nav className="flex-1 space-y-1 px-4 py-4">
+            {navigation.map((item) => (
+              <NavigationItem key={item.name} item={item} />
+            ))}
+          </nav>
+          
+          <div className="border-t border-gray-200 p-4">
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center px-3 py-2 text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors"
+            >
+              <LogOut className="mr-3 h-5 w-5 text-gray-400" />
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop sidebar */}
+      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+        <div className="flex flex-col flex-grow bg-white border-r border-gray-200 shadow-sm">
+          <div className="flex h-16 items-center px-4 shadow-sm">
+            <div className="flex items-center">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
+                <User className="h-5 w-5 text-white" />
               </div>
+              <span className="ml-2 text-lg font-semibold text-gray-900">Panel de Control</span>
             </div>
+          </div>
+          
+          <nav className="flex-1 space-y-1 px-4 py-4">
+            {navigation.map((item) => (
+              <NavigationItem key={item.name} item={item} />
+            ))}
+          </nav>
+          
+          <div className="border-t border-gray-200 p-4">
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center px-3 py-2 text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors"
+            >
+              <LogOut className="mr-3 h-5 w-5 text-gray-400" />
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
 
-            {/* Navegación Desktop */}
-            <nav className="hidden md:flex items-center space-x-1">
-              {menuItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = isActivePath(item.path);
-                
-                return (
-                  <Link key={item.path} href={item.path}>
-                    <div
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer ${
-                        isActive
-                          ? 'bg-blue-100 text-blue-700 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span className="font-medium">{item.name}</span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </nav>
-
-            {/* Usuario y logout */}
-            <div className="flex items-center gap-3">
-              {user && (
-                <div className="hidden sm:block text-right">
-                  <p className="text-sm font-medium text-gray-900">
-                    {user.email}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Administrador
-                  </p>
-                </div>
-              )}
-              
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                title="Cerrar sesión"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Salir</span>
-              </button>
-
-              {/* Mobile menu button */}
-              <button
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="md:hidden p-2 rounded-lg text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
-              >
-                {isMenuOpen ? (
-                  <X className="w-6 h-6" />
-                ) : (
-                  <Menu className="w-6 h-6" />
-                )}
-              </button>
-            </div>
+      {/* Main content */}
+      <div className="lg:pl-64">
+        {/* Top bar for mobile */}
+        <div className="flex h-16 items-center gap-x-4 bg-white px-4 shadow-sm lg:hidden">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="text-gray-500 hover:text-gray-600"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+          <div className="flex-1">
+            <h1 className="text-lg font-semibold text-gray-900">{title}</h1>
           </div>
         </div>
 
-        {/* Mobile Navigation */}
-        {isMenuOpen && (
-          <div className="md:hidden border-t border-gray-200 bg-white shadow-lg">
-            <div className="px-2 pt-2 pb-3 space-y-1">
-              {menuItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = isActivePath(item.path);
-                
-                return (
-                  <Link key={item.path} href={item.path}>
-                    <div
-                      onClick={() => setIsMenuOpen(false)}
-                      className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-all cursor-pointer ${
-                        isActive
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                      }`}
-                    >
-                      <Icon className="w-5 h-5" />
-                      <div>
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-xs text-gray-500">{item.description}</p>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-            
-            {/* Mobile user info */}
-            {user && (
-              <div className="border-t border-gray-200 px-4 py-3 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {user.email}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      Administrador
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Cerrar sesión
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1">
-        {children}
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 py-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center text-sm text-gray-500">
-            <p>© 2025 Sistema de Reservas. Todos los derechos reservados.</p>
-            <p>
-              Versión 1.0 - Conectado con Supabase
-            </p>
-          </div>
-        </div>
-      </footer>
+        {/* Page content */}
+        <main className="flex-1">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
