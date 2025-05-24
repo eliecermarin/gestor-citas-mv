@@ -428,7 +428,7 @@ const ReservationSystem = () => {
               name="notes"
               value={formData.notes}
               onChange={handleInputChange}
-              rows="3"
+              rows={3}
               className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none hover:border-gray-300"
               placeholder="Cualquier información adicional o solicitud especial..."
             />
