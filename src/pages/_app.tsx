@@ -13,16 +13,41 @@ export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
+  const [error, setError] = useState<string>("")
 
   useEffect(() => {
+    // Timeout para evitar loading infinito
+    const timeoutId = setTimeout(() => {
+      console.log('⚠️ TIMEOUT: Carga tomó más de 10 segundos');
+      setLoading(false);
+      setError("Timeout cargando la aplicación");
+    }, 10000);
+
     // Verificar sesión inicial
     const getInitialSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession()
+        console.log('🔍 DEBUG: Iniciando verificación de sesión...');
+        console.log('🔍 DEBUG: Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+        console.log('🔍 DEBUG: Supabase Key exists:', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+        
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        console.log('🔍 DEBUG: Respuesta de getSession:', { session: !!session, error });
+        
+        if (error) {
+          console.error('❌ DEBUG: Error en getSession:', error);
+          setError(`Error de autenticación: ${error.message}`);
+        }
+        
         setUser(session?.user ?? null)
+        clearTimeout(timeoutId);
         setLoading(false)
+        
+        console.log('✅ DEBUG: Sesión verificada, loading = false');
       } catch (error) {
-        console.error('Error getting session:', error)
+        console.error('💥 DEBUG: Error capturado:', error)
+        setError(`Error: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+        clearTimeout(timeoutId);
         setLoading(false)
       }
     }
@@ -30,6 +55,7 @@ export default function App({ Component, pageProps }: AppProps) {
     // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('🔍 DEBUG: Auth state change:', event, !!session);
         setUser(session?.user ?? null)
         
         // Redirigir según el estado de autenticación
@@ -63,12 +89,16 @@ export default function App({ Component, pageProps }: AppProps) {
 
     getInitialSession()
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(timeoutId)
+    }
   }, [router])
 
   // Redirigir a login si no está autenticado (excepto en página de login)
   useEffect(() => {
     if (!loading && !user && router.pathname !== '/login') {
+      console.log('🔍 DEBUG: Redirigiendo a login');
       router.push('/login')
     }
   }, [user, loading, router])
@@ -76,6 +106,72 @@ export default function App({ Component, pageProps }: AppProps) {
   // Páginas que no necesitan layout
   const noLayoutPages = ['/login']
   const showLayout = !noLayoutPages.includes(router.pathname)
+
+  // Mostrar error si hay problemas
+  if (error) {
+    return (
+      <>
+        <style jsx global>{`
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+          }
+        `}</style>
+        <div style={{ 
+          minHeight: '100vh', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          padding: '2rem'
+        }}>
+          <div style={{ 
+            textAlign: 'center',
+            background: 'rgba(255, 255, 255, 0.95)',
+            padding: '2rem',
+            borderRadius: '1rem',
+            boxShadow: '0 25px 50px rgba(0, 0, 0, 0.15)',
+            maxWidth: '500px'
+          }}>
+            <div style={{ 
+              width: '48px', 
+              height: '48px', 
+              background: '#ef4444',
+              borderRadius: '50%',
+              margin: '0 auto 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              fontSize: '24px'
+            }}>⚠</div>
+            <h2 style={{ color: '#dc2626', marginBottom: '1rem' }}>Error de Configuración</h2>
+            <p style={{ color: '#666', fontSize: '1rem', marginBottom: '1rem' }}>{error}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              style={{
+                background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                color: 'white',
+                padding: '0.75rem 1.5rem',
+                border: 'none',
+                borderRadius: '0.5rem',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      </>
+    )
+  }
 
   // Mostrar loading mientras verifica autenticación
   if (loading) {
@@ -120,7 +216,8 @@ export default function App({ Component, pageProps }: AppProps) {
               animation: 'spin 1s linear infinite',
               margin: '0 auto 16px'
             }}></div>
-            <p style={{ color: '#666', fontSize: '1.1rem' }}>Cargando aplicación...</p>
+            <p style={{ color: '#666', fontSize: '1.1rem', marginBottom: '0.5rem' }}>Cargando aplicación...</p>
+            <p style={{ color: '#999', fontSize: '0.9rem' }}>Verificando autenticación</p>
           </div>
         </div>
       </>
