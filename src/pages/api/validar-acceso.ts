@@ -1,26 +1,39 @@
-import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../supabaseClient";
+import { NextApiRequest, NextApiResponse } from 'next';
+import { supabase } from '../../lib/supabaseclient';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (!token) return res.status(401).json({ error: "Token requerido" });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Método no permitido' });
+  }
 
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return res.status(401).json({ error: "Usuario no válido" });
+  try {
+    const { userId } = req.body;
 
-  const { data: cliente } = await supabase
-    .from("clientes")
-    .select("fecha_alta")
-    .eq("id", user.id)
-    .single();
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID requerido' });
+    }
 
-  if (!cliente) return res.status(401).json({ error: "Cliente no encontrado" });
+    // Verificar si el usuario tiene acceso
+    const { data: trabajadores, error } = await supabase
+      .from('trabajadores')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(1);
 
-  const fechaAlta = new Date(cliente.fecha_alta);
-  const hoy = new Date();
-  const diferenciaDias = Math.floor((hoy.getTime() - fechaAlta.getTime()) / (1000 * 60 * 60 * 24));
+    if (error) {
+      console.error('Error validando acceso:', error);
+      return res.status(500).json({ message: 'Error del servidor' });
+    }
 
-  if (diferenciaDias > 30) return res.status(403).json({ error: "Prueba caducada" });
+    const tieneAcceso = trabajadores && trabajadores.length > 0;
 
-  return res.status(200).json({ acceso: "ok" });
+    return res.status(200).json({ 
+      hasAccess: tieneAcceso,
+      redirectTo: tieneAcceso ? '/carga-trabajo' : '/configuracion'
+    });
+
+  } catch (error) {
+    console.error('Error en validar-acceso:', error);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
 }
