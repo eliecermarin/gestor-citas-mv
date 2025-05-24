@@ -2,7 +2,7 @@ import type { AppProps } from 'next/app'
 import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseclient'
+import { supabase } from '../supabaseClient'
 import '../styles/globals.css'
 
 interface User {

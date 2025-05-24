@@ -1,7 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Calendar, Settings, LogOut, Menu, X, User, Clock } from 'lucide-react';
-import { supabase } from '../lib/supabaseclient';
+import { supabase } from '../../supabaseClient';
 
 interface LayoutProps {
   children: ReactNode;

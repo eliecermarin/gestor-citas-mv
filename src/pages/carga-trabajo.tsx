@@ -1,127 +1,22 @@
 import { useEffect, useState, useCallback } from "react";
-import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X, AlertCircle } from "lucide-react";
+import { supabase } from "../lib/supabaseclient";
+import { useRouter } from "next/router";
 
 const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
 // Horas para el calendario principal (de hora en hora)
 const horasCalendario = Array.from({ length: 15 }, (_, i) => `${(8 + i).toString().padStart(2, '0')}:00`); // 08:00 - 22:00
 
-// Horas para el selector del formulario (intervalos de 5 minutos)
+// Horas para el selector del formulario (intervalos de 15 minutos)
 const horasFormulario: string[] = [];
-for (let hour = 8; hour <= 22; hour++) {
-  for (let minute = 0; minute < 60; minute += 5) {
-    if (hour === 22 && minute > 0) break; // No pasar de 22:00
+for (let hour = 8; hour <= 21; hour++) {
+  for (let minute = 0; minute < 60; minute += 15) {
+    if (hour === 21 && minute > 45) break; // No pasar de 21:45
     const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
     horasFormulario.push(timeString);
   }
 }
-
-// Simulamos supabase para el ejemplo
-let mockReservas: Reserva[] = [];
-
-type SupabaseResponse<T> = { data: T[] | null };
-type SupabaseInsertResponse = { data: Reserva | null };
-type SupabaseUpdateResponse = { data: Reserva | null };
-type SupabaseDeleteResponse = { data: null };
-
-const supabase = {
-  from: (table: string) => ({
-    select: (): Promise<SupabaseResponse<Trabajador | Reserva>> => {
-      if (table === "trabajadores") {
-        return Promise.resolve({ data: [
-          { id: "1", nombre: "María García" },
-          { id: "2", nombre: "Ana López" },
-          { id: "3", nombre: "Carmen Silva" }
-        ] as Trabajador[] });
-      } else if (table === "reservas") {
-        // Inicializar datos de ejemplo solo la primera vez
-        if (mockReservas.length === 0) {
-          const hoy = new Date();
-          const mañana = new Date(hoy);
-          mañana.setDate(hoy.getDate() + 1);
-          const pasadoMañana = new Date(hoy);
-          pasadoMañana.setDate(hoy.getDate() + 2);
-          
-          mockReservas = [
-            {
-              id: "1",
-              trabajador: "1",
-              fecha: hoy.toISOString().split("T")[0],
-              hora: "08:15",
-              cliente: {
-                nombre: "Laura Martín García",
-                telefono: "612345678",
-                email: "laura.martin@email.com"
-              },
-              observaciones: "Reunión matutina"
-            },
-            {
-              id: "2",
-              trabajador: "1",
-              fecha: hoy.toISOString().split("T")[0],
-              hora: "10:30",
-              cliente: {
-                nombre: "Carlos González Pérez",
-                telefono: "654987321",
-                email: "carlos.gonzalez@email.com"
-              },
-              observaciones: "Consulta técnica"
-            },
-            {
-              id: "3",
-              trabajador: "1",
-              fecha: mañana.toISOString().split("T")[0],
-              hora: "15:30",
-              cliente: {
-                nombre: "Patricia Ruiz López",
-                telefono: "687654321",
-                email: "patricia.ruiz@email.com"
-              },
-              observaciones: "Consulta inicial"
-            },
-            {
-              id: "4",
-              trabajador: "2",
-              fecha: pasadoMañana.toISOString().split("T")[0],
-              hora: "09:45",
-              cliente: {
-                nombre: "Ana María Sánchez",
-                telefono: "600123456",
-                email: "anamaria@email.com"
-              },
-              observaciones: "Revisión trimestral"
-            }
-          ];
-        }
-        return Promise.resolve({ data: [...mockReservas] });
-      }
-      return Promise.resolve({ data: [] });
-    },
-    insert: (data: Omit<Reserva, 'id'>): Promise<SupabaseInsertResponse> => {
-      const newReserva = {
-        ...data,
-        id: Date.now().toString()
-      };
-      mockReservas.push(newReserva);
-      return Promise.resolve({ data: newReserva });
-    },
-    update: (data: Partial<Reserva>) => ({
-      eq: (field: string, value: string): Promise<SupabaseUpdateResponse> => {
-        const index = mockReservas.findIndex((r) => (r as Record<string, unknown>)[field] === value);
-        if (index !== -1) {
-          mockReservas[index] = { ...mockReservas[index], ...data };
-        }
-        return Promise.resolve({ data: mockReservas[index] || null });
-      }
-    }),
-    delete: () => ({
-      eq: (field: string, value: string): Promise<SupabaseDeleteResponse> => {
-        mockReservas = mockReservas.filter((r) => (r as Record<string, unknown>)[field] !== value);
-        return Promise.resolve({ data: null });
-      }
-    })
-  })
-};
 
 type Reserva = {
   id: string;
@@ -134,11 +29,22 @@ type Reserva = {
     email: string;
   };
   observaciones: string;
+  user_id: string;
 };
 
 type Trabajador = {
   id: string;
   nombre: string;
+  servicios: number[];
+  festivos: string[];
+  duracionCitaDefecto: number;
+};
+
+type Servicio = {
+  id: number;
+  nombre: string;
+  duracion: number;
+  precio: number;
 };
 
 type ModalData = {
@@ -150,39 +56,118 @@ type ModalData = {
     telefono: string;
     email: string;
   };
+  observaciones?: string;
 };
 
 export default function CargaTrabajo() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
   const [reservas, setReservas] = useState<Reserva[]>([]);
   const [reservasFiltradas, setReservasFiltradas] = useState<Reserva[]>([]);
   const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
+  const [servicios, setServicios] = useState<Servicio[]>([]);
   const [trabajadorActivo, setTrabajadorActivo] = useState<string | null>(null);
   const [modalData, setModalData] = useState<ModalData | null>(null);
   const [fechaActual, setFechaActual] = useState<Date>(new Date());
   const [busqueda, setBusqueda] = useState<string>("");
   const [modalDisponibilidad, setModalDisponibilidad] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string>("");
 
+  // Verificar autenticación y cargar datos
   useEffect(() => {
-    const cargarTrabajadores = async () => {
-      const { data } = await supabase.from("trabajadores").select();
-      if (data) {
-        setTrabajadores(data as Trabajador[]);
-        setTrabajadorActivo((data as Trabajador[])[0]?.id || null);
+    const checkAuthAndLoadData = async () => {
+      try {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+          setUser(currentUser);
+          await cargarDatos(currentUser.id);
+        } else {
+          router.push('/login');
+        }
+      } catch (error) {
+        console.error('Error de autenticación:', error);
+        router.push('/login');
       }
     };
-    cargarTrabajadores();
-  }, []);
 
-  useEffect(() => {
-    const cargarReservas = async () => {
-      const { data } = await supabase.from("reservas").select();
-      if (data) {
-        setReservas(data as Reserva[]);
-        setReservasFiltradas(data as Reserva[]);
+    checkAuthAndLoadData();
+  }, [router]);
+
+  const cargarDatos = async (userId: string) => {
+    setIsLoading(true);
+    setError("");
+    
+    try {
+      // Cargar trabajadores
+      const { data: trabajadoresData, error: errorTrabajadores } = await supabase
+        .from('trabajadores')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (errorTrabajadores) throw errorTrabajadores;
+      
+      const trabajadoresProcesados = (trabajadoresData || []).map((t: any) => ({
+        id: t.id,
+        nombre: t.nombre,
+        servicios: t.servicios || [],
+        festivos: t.festivos || [],
+        duracionCitaDefecto: t.duracionCitaDefecto || 30
+      }));
+      
+      setTrabajadores(trabajadoresProcesados);
+      
+      if (trabajadoresProcesados.length > 0 && !trabajadorActivo) {
+        setTrabajadorActivo(trabajadoresProcesados[0].id);
       }
-    };
-    cargarReservas();
-  }, []);
+
+      // Cargar servicios
+      const { data: serviciosData, error: errorServicios } = await supabase
+        .from('servicios')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (errorServicios) throw errorServicios;
+      setServicios(serviciosData || []);
+
+      // Cargar reservas
+      await cargarReservas(userId);
+
+    } catch (error) {
+      console.error('Error cargando datos:', error);
+      setError('Error cargando datos. Por favor, recarga la página.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const cargarReservas = async (userId: string) => {
+    try {
+      const { data: reservasData, error: errorReservas } = await supabase
+        .from('reservas')
+        .select('*')
+        .eq('user_id', userId)
+        .order('fecha', { ascending: true })
+        .order('hora', { ascending: true });
+
+      if (errorReservas) throw errorReservas;
+      
+      const reservasProcesadas = (reservasData || []).map((r: any) => ({
+        id: r.id,
+        trabajador: r.trabajador,
+        fecha: r.fecha,
+        hora: r.hora,
+        cliente: r.cliente || { nombre: '', telefono: '', email: '' },
+        observaciones: r.observaciones || '',
+        user_id: r.user_id
+      }));
+      
+      setReservas(reservasProcesadas);
+      setReservasFiltradas(reservasProcesadas);
+    } catch (error) {
+      console.error('Error cargando reservas:', error);
+    }
+  };
 
   const navegarAFecha = useCallback((fecha: Date) => {
     const inicioSemanaObjetivo = getInicioSemana(fecha);
@@ -198,7 +183,8 @@ export default function CargaTrabajo() {
         const busquedaLower = busqueda.toLowerCase();
         return (
           reserva.cliente?.nombre?.toLowerCase().includes(busquedaLower) ||
-          reserva.cliente?.email?.toLowerCase().includes(busquedaLower)
+          reserva.cliente?.email?.toLowerCase().includes(busquedaLower) ||
+          reserva.cliente?.telefono?.toLowerCase().includes(busquedaLower)
         );
       });
       setReservasFiltradas(filtradas);
@@ -272,19 +258,86 @@ export default function CargaTrabajo() {
     const fecha = new Date(inicioSemana);
     fecha.setDate(inicioSemana.getDate() + diaIndice);
     const iso = fecha.toISOString().split("T")[0];
-    setModalData(reserva ? { ...reserva, cliente: reserva.cliente } : { fecha: iso, hora });
+    
+    if (reserva) {
+      setModalData({
+        id: reserva.id,
+        fecha: reserva.fecha,
+        hora: reserva.hora,
+        cliente: reserva.cliente,
+        observaciones: reserva.observaciones
+      });
+    } else {
+      setModalData({ fecha: iso, hora });
+    }
   };
 
   const eliminarReserva = async (id: string) => {
+    if (!user || !confirm('¿Estás seguro de que quieres eliminar esta reserva?')) return;
+    
     try {
-      await supabase.from("reservas").delete().eq("id", id);
-      const { data: nuevasReservas } = await supabase.from("reservas").select();
-      if (nuevasReservas) {
-        setReservas(nuevasReservas as Reserva[]);
-        setReservasFiltradas(nuevasReservas as Reserva[]);
-      }
+      const { error } = await supabase
+        .from('reservas')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      
+      await cargarReservas(user.id);
     } catch (error) {
       console.error('Error al eliminar reserva:', error);
+      alert('Error al eliminar la reserva');
+    }
+  };
+
+  const guardarReserva = async (formData: FormData) => {
+    if (!user || !trabajadorActivo) return;
+
+    const cliente = {
+      nombre: formData.get('nombre') as string,
+      telefono: formData.get('telefono') as string,
+      email: formData.get('email') as string
+    };
+
+    const hora = formData.get('hora') as string;
+    const observaciones = formData.get('observaciones') as string || '';
+
+    try {
+      if (modalData?.id) {
+        // Actualizar reserva existente
+        const { error } = await supabase
+          .from('reservas')
+          .update({
+            hora,
+            cliente,
+            observaciones
+          })
+          .eq('id', modalData.id)
+          .eq('user_id', user.id);
+
+        if (error) throw error;
+      } else {
+        // Crear nueva reserva
+        const { error } = await supabase
+          .from('reservas')
+          .insert([{
+            trabajador: trabajadorActivo,
+            fecha: modalData?.fecha,
+            hora,
+            cliente,
+            observaciones,
+            user_id: user.id
+          }]);
+
+        if (error) throw error;
+      }
+
+      await cargarReservas(user.id);
+      setModalData(null);
+    } catch (error) {
+      console.error('Error guardando reserva:', error);
+      alert('Error al guardar la reserva');
     }
   };
 
@@ -305,7 +358,8 @@ export default function CargaTrabajo() {
     const busquedaLower = busqueda.toLowerCase();
     return (
       reserva.cliente?.nombre?.toLowerCase().includes(busquedaLower) ||
-      reserva.cliente?.email?.toLowerCase().includes(busquedaLower)
+      reserva.cliente?.email?.toLowerCase().includes(busquedaLower) ||
+      reserva.cliente?.telefono?.toLowerCase().includes(busquedaLower)
     );
   };
 
@@ -351,6 +405,59 @@ export default function CargaTrabajo() {
     return disponibilidades.slice(0, 10);
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Cargando agenda...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center bg-white p-8 rounded-2xl shadow-lg">
+          <div className="text-red-500 mb-4">
+            <AlertCircle className="w-12 h-12 mx-auto" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Error</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            Recargar página
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (trabajadores.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center bg-white p-8 rounded-2xl shadow-lg">
+          <div className="text-yellow-500 mb-4">
+            <User className="w-12 h-12 mx-auto" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Sin Trabajadores</h2>
+          <p className="text-gray-600 mb-4">
+            No tienes trabajadores configurados aún. Ve a la página de configuración para agregar trabajadores.
+          </p>
+          <button 
+            onClick={() => router.push('/configuracion')}
+            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            Ir a Configuración
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <div className="container mx-auto p-3 md:p-6">
@@ -364,6 +471,9 @@ export default function CargaTrabajo() {
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Agenda Semanal</h1>
                 <p className="text-gray-600 text-sm md:text-base">Gestión de citas y reservas</p>
+                {user && (
+                  <p className="text-xs text-blue-600">Usuario: {user.email}</p>
+                )}
               </div>
             </div>
             
@@ -672,6 +782,12 @@ export default function CargaTrabajo() {
                                     {r.cliente?.email}
                                   </a>
                                 </div>
+
+                                {r.observaciones && (
+                                  <div className="mt-3 p-2 bg-gray-100 rounded-lg">
+                                    <p className="text-sm text-gray-700">{r.observaciones}</p>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -702,17 +818,21 @@ export default function CargaTrabajo() {
       {modalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full">
-                  <User className="w-5 h-5 text-white" />
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+              guardarReserva(formData);
+            }}>
+              <div className="p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full">
+                    <User className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    {modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}
+                  </h2>
                 </div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  {modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}
-                </h2>
-              </div>
-              
-              <div>
+                
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -769,6 +889,19 @@ export default function CargaTrabajo() {
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Observaciones (opcional)
+                    </label>
+                    <textarea 
+                      name="observaciones" 
+                      defaultValue={modalData?.observaciones || ""} 
+                      placeholder="Observaciones adicionales..." 
+                      rows={3}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    />
+                  </div>
                 </div>
                 
                 <div className="flex justify-end gap-3 mt-8">
@@ -780,54 +913,14 @@ export default function CargaTrabajo() {
                     Cancelar
                   </button>
                   <button 
-                    type="button" 
-                    onClick={async () => {
-                      const nombreInput = document.querySelector('input[name="nombre"]') as HTMLInputElement;
-                      const telefonoInput = document.querySelector('input[name="telefono"]') as HTMLInputElement;
-                      const emailInput = document.querySelector('input[name="email"]') as HTMLInputElement;
-                      const horaSelect = document.querySelector('select[name="hora"]') as HTMLSelectElement;
-                      
-                      if (nombreInput && telefonoInput && emailInput && horaSelect && trabajadorActivo) {
-                        const cliente = {
-                          nombre: nombreInput.value,
-                          telefono: telefonoInput.value,
-                          email: emailInput.value
-                        };
-                        
-                        const modalDataActualizado = {...modalData, hora: horaSelect.value};
-                        
-                        if (modalDataActualizado.id) {
-                          await supabase.from("reservas").update({ cliente, hora: horaSelect.value }).eq("id", modalDataActualizado.id);
-                          const { data } = await supabase.from("reservas").select();
-                          if (data) {
-                            setReservas(data as Reserva[]);
-                            setReservasFiltradas(data as Reserva[]);
-                          }
-                          setModalData(null);
-                        } else {
-                          await supabase.from("reservas").insert({
-                            trabajador: trabajadorActivo,
-                            fecha: modalDataActualizado.fecha,
-                            hora: horaSelect.value,
-                            cliente,
-                            observaciones: ""
-                          });
-                          const { data } = await supabase.from("reservas").select();
-                          if (data) {
-                            setReservas(data as Reserva[]);
-                            setReservasFiltradas(data as Reserva[]);
-                          }
-                          setModalData(null);
-                        }
-                      }
-                    }}
+                    type="submit"
                     className="px-6 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all shadow-lg hover:shadow-xl"
                   >
                     Guardar Reserva
                   </button>
                 </div>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
