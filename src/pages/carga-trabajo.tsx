@@ -319,26 +319,6 @@ export default function CargaTrabajo() {
     }
   };
 
-  const abrirModal = (dia, hora, reserva) => {
-    const inicioSemana = getInicioSemana(fechaActual);
-    const diaIndice = diasSemana.indexOf(dia);
-    const fecha = new Date(inicioSemana);
-    fecha.setDate(inicioSemana.getDate() + diaIndice);
-    const iso = fecha.toISOString().split("T")[0];
-    
-    if (reserva) {
-      setModalData({
-        id: reserva.id,
-        fecha: reserva.fecha,
-        hora: reserva.hora,
-        cliente: reserva.cliente,
-        observaciones: reserva.observaciones
-      });
-    } else {
-      setModalData({ fecha: iso, hora });
-    }
-  };
-
   const eliminarReserva = async (id) => {
     if (!user || !confirm('¿Estás seguro de que quieres eliminar esta reserva?')) return;
     
@@ -356,58 +336,6 @@ export default function CargaTrabajo() {
     } catch (error) {
       console.error('Error al eliminar reserva:', error);
       showMessage('Error al eliminar la reserva', 'error');
-    }
-  };
-
-  const guardarReserva = async (formData) => {
-    if (!user || !trabajadorActivo) return;
-
-    const cliente = {
-      nombre: formData.get('nombre'),
-      telefono: formData.get('telefono'),
-      email: formData.get('email')
-    };
-
-    const hora = formData.get('hora');
-    const observaciones = formData.get('observaciones') || '';
-
-    try {
-      if (modalData?.id) {
-        // Actualizar reserva existente
-        const { error } = await supabase
-          .from('reservas')
-          .update({
-            hora,
-            cliente,
-            observaciones
-          })
-          .eq('id', modalData.id)
-          .eq('user_id', user.id);
-
-        if (error) throw error;
-        showMessage('Reserva actualizada exitosamente', 'success');
-      } else {
-        // Crear nueva reserva
-        const { error } = await supabase
-          .from('reservas')
-          .insert([{
-            trabajador: trabajadorActivo,
-            fecha: modalData?.fecha,
-            hora,
-            cliente,
-            observaciones,
-            user_id: user.id
-          }]);
-
-        if (error) throw error;
-        showMessage('Reserva creada exitosamente', 'success');
-      }
-
-      await cargarReservas(user.id);
-      setModalData(null);
-    } catch (error) {
-      console.error('Error guardando reserva:', error);
-      showMessage('Error al guardar la reserva', 'error');
     }
   };
 
@@ -850,15 +778,6 @@ export default function CargaTrabajo() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="p-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full">
-                    <User className="w-5 h-5 text-white" />
-                  </div>
-                  <h2 className="text-xl font-bold text-gray-800">
-                    {modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}
-                  </h2>
-                </div>
-                
               <div className="flex items-center gap-3 mb-6">
                 <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full">
                   <User className="w-5 h-5 text-white" />
