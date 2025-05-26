@@ -3,6 +3,9 @@ import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../supabaseClient'
+// 🔥 LÍNEA CRÍTICA - IMPORTAR ESTILOS
+import '../styles/globals.css'
+
 
 interface User {
   id: string;
