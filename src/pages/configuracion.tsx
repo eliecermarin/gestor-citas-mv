@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Euro, Bell, Palette, MessageSquare, CheckCircle } from "lucide-react";
+import { Settings, User, Clock, Calendar, Trash2, Plus, ChevronDown, ChevronUp, Euro, X } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useRouter } from "next/router";
 
@@ -12,17 +12,21 @@ interface Servicio {
   user_id?: string;
 }
 
+interface FranjaHoraria {
+  inicio: string;
+  fin: string;
+}
+
+interface HorariosTrabajo {
+  [key: string]: FranjaHoraria[];
+}
+
 interface Trabajador {
   id: string;
   nombre: string;
   servicios: Servicio[];
   festivos: string[];
-  limiteDiasReserva: number;
-  horaInicio: string;
-  horaFin: string;
-  diasTrabajo: string[];
-  tiempoDescanso: number;
-  color: string;
+  horariosTrabajo: HorariosTrabajo;
   user_id?: string;
 }
 
@@ -47,24 +51,18 @@ interface TrabajadorData {
   horaInicio?: string;
   horaFin?: string;
   diasTrabajo?: string[];
-  tiempoDescanso?: number;
-  color?: string;
+  horariosTrabajo?: HorariosTrabajo;
   user_id: string;
 }
 
-const coloresDisponibles = [
-  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', 
-  '#8b5cf6', '#06b6d4', '#84cc16', '#f97316'
-];
-
 const diasSemana = [
-  { id: 'lunes', nombre: 'L' },
-  { id: 'martes', nombre: 'M' },
-  { id: 'miercoles', nombre: 'X' },
-  { id: 'jueves', nombre: 'J' },
-  { id: 'viernes', nombre: 'V' },
-  { id: 'sabado', nombre: 'S' },
-  { id: 'domingo', nombre: 'D' }
+  { id: 'lunes', nombre: 'Lunes', abrev: 'L' },
+  { id: 'martes', nombre: 'Martes', abrev: 'M' },
+  { id: 'miercoles', nombre: 'Miércoles', abrev: 'X' },
+  { id: 'jueves', nombre: 'Jueves', abrev: 'J' },
+  { id: 'viernes', nombre: 'Viernes', abrev: 'V' },
+  { id: 'sabado', nombre: 'Sábado', abrev: 'S' },
+  { id: 'domingo', nombre: 'Domingo', abrev: 'D' }
 ];
 
 export default function Configuracion() {
@@ -104,22 +102,43 @@ export default function Configuracion() {
 
       if (errorTrabajadores) throw errorTrabajadores;
 
-      // Procesar trabajadores con sus servicios
-      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => ({
-        id: t.id,
-        nombre: t.nombre,
-        servicios: t.servicios ? 
-          t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
-          : [],
-        festivos: t.festivos || [],
-        limiteDiasReserva: t.duracionCitaDefecto || 30,
-        horaInicio: t.horaInicio || '09:00',
-        horaFin: t.horaFin || '18:00',
-        diasTrabajo: t.diasTrabajo || ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'],
-        tiempoDescanso: t.tiempoDescanso || 0,
-        color: t.color || coloresDisponibles[0],
-        user_id: t.user_id
-      }));
+      // Procesar trabajadores con sus servicios y horarios
+      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => {
+        // Migrar horarios antiguos al nuevo formato si es necesario
+        let horariosTrabajo: HorariosTrabajo = {};
+        
+        if (t.horariosTrabajo) {
+          // Ya tiene el nuevo formato
+          horariosTrabajo = t.horariosTrabajo;
+        } else if (t.diasTrabajo && t.horaInicio && t.horaFin) {
+          // Migrar del formato antiguo
+          t.diasTrabajo.forEach(dia => {
+            horariosTrabajo[dia] = [{
+              inicio: t.horaInicio || '09:00',
+              fin: t.horaFin || '18:00'
+            }];
+          });
+        } else {
+          // Configuración por defecto
+          ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
+            horariosTrabajo[dia] = [{
+              inicio: '09:00',
+              fin: '18:00'
+            }];
+          });
+        }
+
+        return {
+          id: t.id,
+          nombre: t.nombre,
+          servicios: t.servicios ? 
+            t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
+            : [],
+          festivos: t.festivos || [],
+          horariosTrabajo,
+          user_id: t.user_id
+        };
+      });
 
       setTrabajadores(trabajadoresProcesados);
       
@@ -176,16 +195,18 @@ export default function Configuracion() {
     try {
       console.log('🔄 Intentando crear trabajador:', nuevoTrabajador);
       
+      // Horarios por defecto (Lunes a Viernes 9:00-18:00)
+      const horariosDefecto: HorariosTrabajo = {};
+      ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
+        horariosDefecto[dia] = [{ inicio: '09:00', fin: '18:00' }];
+      });
+      
       const trabajadorData = {
         nombre: nuevoTrabajador.trim(),
         servicios: [],
         festivos: [],
         duracionCitaDefecto: 30,
-        horaInicio: '09:00',
-        horaFin: '18:00',
-        diasTrabajo: ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'],
-        tiempoDescanso: 0,
-        color: coloresDisponibles[trabajadores.length % coloresDisponibles.length],
+        horariosTrabajo: horariosDefecto,
         user_id: user.id
       };
 
@@ -205,12 +226,7 @@ export default function Configuracion() {
         nombre: data.nombre,
         servicios: [],
         festivos: data.festivos || [],
-        limiteDiasReserva: data.duracionCitaDefecto || 30,
-        horaInicio: data.horaInicio || '09:00',
-        horaFin: data.horaFin || '18:00',
-        diasTrabajo: data.diasTrabajo || ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'],
-        tiempoDescanso: data.tiempoDescanso || 0,
-        color: data.color || coloresDisponibles[0],
+        horariosTrabajo: data.horariosTrabajo || horariosDefecto,
         user_id: data.user_id
       };
       
@@ -414,16 +430,25 @@ export default function Configuracion() {
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Actualizar configuración del trabajador
-  const actualizarConfiguracionTrabajador = async (trabajadorId: string, campo: string, valor: any) => {
+  // 🔥 NUEVA FUNCIÓN: Agregar franja horaria
+  const agregarFranjaHoraria = async (trabajadorId: string, dia: string) => {
     if (!user) return;
     
     try {
-      const updateData = { [campo]: valor };
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      const nuevosHorarios = { ...trabajador.horariosTrabajo };
+      if (!nuevosHorarios[dia]) {
+        nuevosHorarios[dia] = [];
+      }
       
+      // Agregar nueva franja por defecto
+      nuevosHorarios[dia].push({ inicio: '09:00', fin: '18:00' });
+
       const { error } = await supabase
         .from('trabajadores')
-        .update(updateData)
+        .update({ horariosTrabajo: nuevosHorarios })
         .eq('id', trabajadorId)
         .eq('user_id', user.id);
 
@@ -431,15 +456,87 @@ export default function Configuracion() {
 
       setTrabajadores(trabajadores.map(t => {
         if (t.id === trabajadorId) {
-          return { ...t, [campo]: valor };
+          return { ...t, horariosTrabajo: nuevosHorarios };
         }
         return t;
       }));
       
-      showMessage("Configuración actualizada");
+      showMessage("Franja horaria agregada");
     } catch (error) {
-      console.error('Error actualizando configuración:', error);
-      showMessage("Error actualizando configuración");
+      console.error('Error agregando franja horaria:', error);
+      showMessage("Error agregando franja horaria");
+    }
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Eliminar franja horaria
+  const eliminarFranjaHoraria = async (trabajadorId: string, dia: string, indice: number) => {
+    if (!user) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      const nuevosHorarios = { ...trabajador.horariosTrabajo };
+      if (nuevosHorarios[dia] && nuevosHorarios[dia].length > 1) {
+        nuevosHorarios[dia].splice(indice, 1);
+      } else {
+        // Si solo hay una franja, la eliminamos pero dejamos el día sin horarios
+        delete nuevosHorarios[dia];
+      }
+
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ horariosTrabajo: nuevosHorarios })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, horariosTrabajo: nuevosHorarios };
+        }
+        return t;
+      }));
+      
+      showMessage("Franja horaria eliminada");
+    } catch (error) {
+      console.error('Error eliminando franja horaria:', error);
+      showMessage("Error eliminando franja horaria");
+    }
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Actualizar franja horaria
+  const actualizarFranjaHoraria = async (trabajadorId: string, dia: string, indice: number, campo: 'inicio' | 'fin', valor: string) => {
+    if (!user) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      const nuevosHorarios = { ...trabajador.horariosTrabajo };
+      if (nuevosHorarios[dia] && nuevosHorarios[dia][indice]) {
+        nuevosHorarios[dia][indice][campo] = valor;
+      }
+
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ horariosTrabajo: nuevosHorarios })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, horariosTrabajo: nuevosHorarios };
+        }
+        return t;
+      }));
+      
+    } catch (error) {
+      console.error('Error actualizando franja horaria:', error);
+      showMessage("Error actualizando franja horaria");
     }
   };
 
@@ -453,6 +550,14 @@ export default function Configuracion() {
 
   const toggleTrabajador = (id: string) => {
     setTrabajadorExpandido(trabajadorExpandido === id ? null : id);
+  };
+
+  const obtenerResumenHorarios = (horarios: HorariosTrabajo): string => {
+    const diasConHorarios = Object.keys(horarios).length;
+    if (diasConHorarios === 0) return "Sin horarios";
+    
+    const totalFranjas = Object.values(horarios).reduce((total, franjas) => total + franjas.length, 0);
+    return `${diasConHorarios} días • ${totalFranjas} franjas`;
   };
 
   if (isLoading && trabajadores.length === 0) {
@@ -508,7 +613,7 @@ export default function Configuracion() {
                 Configuración del Negocio
               </h1>
               <p style={{ color: '#666', margin: '0.5rem 0 0 0', fontSize: 'clamp(0.875rem, 2.5vw, 1rem)' }}>
-                Gestiona tu equipo, servicios y disponibilidad
+                Gestiona tu equipo, servicios y horarios de trabajo
               </p>
               {user && (
                 <p style={{ color: '#667eea', fontSize: '0.75rem', margin: '0.25rem 0 0 0' }}>
@@ -586,7 +691,7 @@ export default function Configuracion() {
                 {/* Header del Trabajador */}
                 <div 
                   style={{ 
-                    background: `linear-gradient(135deg, ${trabajador.color}, ${trabajador.color}dd)`, 
+                    background: 'linear-gradient(135deg, #667eea, #764ba2)', 
                     padding: '1rem',
                     cursor: 'pointer',
                     color: 'white'
@@ -612,7 +717,7 @@ export default function Configuracion() {
                           {trabajador.nombre}
                         </h3>
                         <p style={{ margin: '0.25rem 0 0 0', opacity: 0.9, fontSize: 'clamp(0.75rem, 2.5vw, 0.875rem)' }}>
-                          {trabajador.servicios.length} servicios • {trabajador.horaInicio}-{trabajador.horaFin}
+                          {trabajador.servicios.length} servicios • {obtenerResumenHorarios(trabajador.horariosTrabajo)}
                         </p>
                       </div>
                     </div>
@@ -661,7 +766,7 @@ export default function Configuracion() {
                           </h4>
                         </div>
                         
-                        {/* Formulario para agregar servicio - MEJORADO PARA MÓVIL */}
+                        {/* Formulario para agregar servicio */}
                         <div style={{ 
                           background: '#f8f9fa', 
                           padding: '1rem', 
@@ -845,7 +950,7 @@ export default function Configuracion() {
                         </div>
                       </div>
 
-                      {/* Horarios de Trabajo */}
+                      {/* 🔥 NUEVA SECCIÓN: Horarios de Trabajo con Franjas */}
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                           <Clock size={20} style={{ color: '#3b82f6' }} />
@@ -855,81 +960,99 @@ export default function Configuracion() {
                         </div>
                         
                         <div style={{ background: '#f0f9ff', padding: '1rem', borderRadius: '0.75rem', border: '1px solid #bfdbfe' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                                Hora de inicio
-                              </label>
-                              <input
-                                type="time"
-                                value={trabajador.horaInicio}
-                                onChange={(e) => actualizarConfiguracionTrabajador(trabajador.id, 'horaInicio', e.target.value)}
-                                style={{ 
-                                  padding: '0.75rem', 
-                                  border: '1px solid #ddd', 
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '100%',
-                                  boxSizing: 'border-box'
-                                }}
-                              />
-                            </div>
-                            
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                                Hora de fin
-                              </label>
-                              <input
-                                type="time"
-                                value={trabajador.horaFin}
-                                onChange={(e) => actualizarConfiguracionTrabajador(trabajador.id, 'horaFin', e.target.value)}
-                                style={{ 
-                                  padding: '0.75rem', 
-                                  border: '1px solid #ddd', 
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '100%',
-                                  boxSizing: 'border-box'
-                                }}
-                              />
-                            </div>
-                          </div>
-                          
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                              Días de trabajo
-                            </label>
-                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                              {diasSemana.map((dia) => (
+                          {diasSemana.map((dia) => (
+                            <div key={dia.id} style={{ marginBottom: '1.5rem' }}>
+                              <div style={{ display: 'flex', items: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                                <h5 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e40af', margin: 0 }}>
+                                  {dia.nombre}
+                                </h5>
                                 <button
-                                  key={dia.id}
-                                  onClick={() => {
-                                    const nuevasDias = trabajador.diasTrabajo.includes(dia.id)
-                                      ? trabajador.diasTrabajo.filter(d => d !== dia.id)
-                                      : [...trabajador.diasTrabajo, dia.id];
-                                    actualizarConfiguracionTrabajador(trabajador.id, 'diasTrabajo', nuevasDias);
-                                  }}
+                                  onClick={() => agregarFranjaHoraria(trabajador.id, dia.id)}
                                   style={{
-                                    width: '40px',
-                                    height: '40px',
-                                    borderRadius: '50%',
-                                    border: '2px solid',
-                                    borderColor: trabajador.diasTrabajo.includes(dia.id) ? '#3b82f6' : '#d1d5db',
-                                    background: trabajador.diasTrabajo.includes(dia.id) ? '#3b82f6' : 'white',
-                                    color: trabajador.diasTrabajo.includes(dia.id) ? 'white' : '#6b7280',
+                                    background: '#3b82f6',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '0.25rem',
                                     cursor: 'pointer',
-                                    fontSize: '0.875rem',
-                                    fontWeight: '600',
+                                    fontSize: '0.75rem',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center'
+                                    gap: '0.25rem'
                                   }}
                                 >
-                                  {dia.nombre}
+                                  <Plus size={12} />
+                                  Franja
                                 </button>
-                              ))}
+                              </div>
+                              
+                              {/* Franjas horarias del día */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                {trabajador.horariosTrabajo[dia.id]?.map((franja, index) => (
+                                  <div key={index} style={{ 
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.5rem',
+                                    background: 'white',
+                                    borderRadius: '0.5rem',
+                                    border: '1px solid #d1d5db'
+                                  }}>
+                                    <input
+                                      type="time"
+                                      value={franja.inicio}
+                                      onChange={(e) => actualizarFranjaHoraria(trabajador.id, dia.id, index, 'inicio', e.target.value)}
+                                      style={{
+                                        padding: '0.25rem',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '0.25rem',
+                                        fontSize: '0.75rem',
+                                        width: '80px'
+                                      }}
+                                    />
+                                    <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>-</span>
+                                    <input
+                                      type="time"
+                                      value={franja.fin}
+                                      onChange={(e) => actualizarFranjaHoraria(trabajador.id, dia.id, index, 'fin', e.target.value)}
+                                      style={{
+                                        padding: '0.25rem',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '0.25rem',
+                                        fontSize: '0.75rem',
+                                        width: '80px'
+                                      }}
+                                    />
+                                    <button
+                                      onClick={() => eliminarFranjaHoraria(trabajador.id, dia.id, index)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: '#ef4444',
+                                        padding: '0.25rem',
+                                        borderRadius: '0.25rem',
+                                        cursor: 'pointer',
+                                        marginLeft: 'auto'
+                                      }}
+                                      title="Eliminar franja"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                )) || (
+                                  <div style={{ 
+                                    textAlign: 'center', 
+                                    padding: '1rem', 
+                                    color: '#6b7280', 
+                                    fontSize: '0.875rem',
+                                    fontStyle: 'italic'
+                                  }}>
+                                    Sin horarios configurados
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
+                          ))}
                         </div>
                       </div>
 
@@ -1000,7 +1123,7 @@ export default function Configuracion() {
                         </div>
 
                         {/* Lista de Días Festivos */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                           {trabajador.festivos.map((fecha) => (
                             <div key={`festivo-${trabajador.id}-${fecha}`} 
                                  style={{ 
@@ -1046,107 +1169,6 @@ export default function Configuracion() {
                               <p style={{ color: '#666', margin: 0, fontSize: '0.875rem' }}>No hay días festivos configurados</p>
                             </div>
                           )}
-                        </div>
-                      </div>
-
-                      {/* Configuración Avanzada */}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                          <Settings size={20} style={{ color: '#f59e0b' }} />
-                          <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
-                            Configuración Avanzada
-                          </h4>
-                        </div>
-
-                        <div style={{ 
-                          background: '#fff7ed', 
-                          border: '1px solid #fed7aa', 
-                          borderRadius: '0.75rem', 
-                          padding: '1rem'
-                        }}>
-                          <div style={{ display: 'grid', gap: '1rem' }}>
-                            {/* Límite de Reserva - AHORA EDITABLE */}
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Shield size={16} />
-                                Límite de Reserva (días de antelación)
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="365"
-                                value={trabajador.limiteDiasReserva}
-                                onChange={(e) => actualizarConfiguracionTrabajador(trabajador.id, 'duracionCitaDefecto', parseInt(e.target.value) || 30)}
-                                style={{
-                                  padding: '0.5rem',
-                                  border: '1px solid #fed7aa',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '80px',
-                                  textAlign: 'center'
-                                }}
-                              />
-                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
-                                Los clientes podrán reservar hasta este número de días de antelación
-                              </p>
-                            </div>
-
-                            {/* Tiempo de Descanso */}
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Clock size={16} />
-                                Tiempo de descanso entre citas (minutos)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                max="60"
-                                step="5"
-                                value={trabajador.tiempoDescanso}
-                                onChange={(e) => actualizarConfiguracionTrabajador(trabajador.id, 'tiempoDescanso', parseInt(e.target.value) || 0)}
-                                style={{
-                                  padding: '0.5rem',
-                                  border: '1px solid #fed7aa',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '80px',
-                                  textAlign: 'center'
-                                }}
-                              />
-                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
-                                Tiempo libre automático entre citas consecutivas
-                              </p>
-                            </div>
-
-                            {/* Color del Trabajador */}
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Palette size={16} />
-                                Color identificativo
-                              </label>
-                              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                {coloresDisponibles.map((color) => (
-                                  <button
-                                    key={color}
-                                    onClick={() => actualizarConfiguracionTrabajador(trabajador.id, 'color', color)}
-                                    style={{
-                                      width: '30px',
-                                      height: '30px',
-                                      backgroundColor: color,
-                                      border: trabajador.color === color ? '3px solid #1f2937' : '2px solid #e5e7eb',
-                                      borderRadius: '50%',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center'
-                                    }}
-                                  >
-                                    {trabajador.color === color && <CheckCircle size={16} color="white" />}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     </div>
