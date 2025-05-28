@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, ChevronDown, ChevronUp, Euro, X, Coffee } from "lucide-react";
+import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, ChevronDown, ChevronUp, Euro, X, Coffee, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useRouter } from "next/router";
 
@@ -80,10 +80,39 @@ export default function Configuracion() {
   const [message, setMessage] = useState<string>("");
   const [nuevosServicios, setNuevosServicios] = useState<Record<string, NuevoServicio>>({});
   const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState<Record<string, string>>({});
+  const [columnasExisten, setColumnasExisten] = useState<boolean>(false);
+  const [verificandoEstructura, setVerificandoEstructura] = useState<boolean>(true);
 
   const showMessage = (msg: string) => {
     setMessage(msg);
-    setTimeout(() => setMessage(""), 3000);
+    setTimeout(() => setMessage(""), 4000);
+  };
+
+  // 🔥 VERIFICAR ESTRUCTURA DE LA TABLA
+  const verificarEstructuraTabla = async () => {
+    try {
+      setVerificandoEstructura(true);
+      
+      // Intentar hacer una consulta simple para verificar columnas
+      const { data, error } = await supabase
+        .from('trabajadores')
+        .select('id, nombre, horariosTrabajo, tiempoDescanso, limiteDiasReserva')
+        .limit(1);
+
+      if (error) {
+        console.log('🔍 Algunas columnas no existen:', error.message);
+        setColumnasExisten(false);
+        showMessage('⚠️ Faltan columnas en la base de datos. Consulta las instrucciones.');
+      } else {
+        console.log('✅ Todas las columnas existen');
+        setColumnasExisten(true);
+      }
+    } catch (error) {
+      console.error('Error verificando estructura:', error);
+      setColumnasExisten(false);
+    } finally {
+      setVerificandoEstructura(false);
+    }
   };
 
   const cargarDatos = useCallback(async (userId: string) => {
@@ -98,25 +127,33 @@ export default function Configuracion() {
       if (errorServicios) throw errorServicios;
       setServiciosGlobales(servicios || []);
 
-      // Cargar trabajadores
+      // Cargar trabajadores - Adaptativo según columnas disponibles
+      let selectQuery = 'id, nombre, servicios, festivos, duracionCitaDefecto, user_id';
+      
+      if (columnasExisten) {
+        selectQuery += ', horariosTrabajo, tiempoDescanso, limiteDiasReserva';
+      } else {
+        selectQuery += ', horaInicio, horaFin, diasTrabajo';
+      }
+
       const { data: trabajadoresData, error: errorTrabajadores } = await supabase
         .from('trabajadores')
-        .select('*')
+        .select(selectQuery)
         .eq('user_id', userId);
 
       if (errorTrabajadores) throw errorTrabajadores;
 
       // Procesar trabajadores con sus servicios y horarios
-      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => {
-        // Migrar horarios antiguos al nuevo formato si es necesario
+      const trabajadoresProcesados = (trabajadoresData || []).map((t: any) => {
+        // Horarios - usar nuevas columnas si existen, sino formato antiguo
         let horariosTrabajo: HorariosTrabajo = {};
         
-        if (t.horariosTrabajo && Object.keys(t.horariosTrabajo).length > 0) {
-          // Ya tiene el nuevo formato
+        if (columnasExisten && t.horariosTrabajo && Object.keys(t.horariosTrabajo).length > 0) {
+          // Usar nuevas columnas
           horariosTrabajo = t.horariosTrabajo;
         } else if (t.diasTrabajo && t.horaInicio && t.horaFin) {
           // Migrar del formato antiguo
-          t.diasTrabajo.forEach(dia => {
+          t.diasTrabajo.forEach((dia: string) => {
             horariosTrabajo[dia] = [{
               inicio: t.horaInicio || '09:00',
               fin: t.horaFin || '18:00'
@@ -140,8 +177,8 @@ export default function Configuracion() {
             : [],
           festivos: t.festivos || [],
           horariosTrabajo,
-          tiempoDescanso: t.tiempoDescanso || 0,
-          limiteDiasReserva: t.limiteDiasReserva || t.duracionCitaDefecto || 30,
+          tiempoDescanso: columnasExisten ? (t.tiempoDescanso || 0) : 0,
+          limiteDiasReserva: columnasExisten ? (t.limiteDiasReserva || 30) : (t.duracionCitaDefecto || 30),
           user_id: t.user_id
         };
       });
@@ -161,7 +198,7 @@ export default function Configuracion() {
     } finally {
       setIsLoading(false);
     }
-  }, [trabajadorExpandido]);
+  }, [trabajadorExpandido, columnasExisten]);
 
   // Verificar autenticación y cargar datos
   useEffect(() => {
@@ -170,7 +207,7 @@ export default function Configuracion() {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
           setUser(currentUser);
-          await cargarDatos(currentUser.id);
+          await verificarEstructuraTabla();
         } else {
           router.push('/login');
         }
@@ -181,7 +218,14 @@ export default function Configuracion() {
     };
 
     checkAuthAndLoadData();
-  }, [router, cargarDatos]);
+  }, [router]);
+
+  // Cargar datos después de verificar estructura
+  useEffect(() => {
+    if (user && !verificandoEstructura) {
+      cargarDatos(user.id);
+    }
+  }, [user, verificandoEstructura, cargarDatos]);
 
   const inicializarEstadosTrabajador = (trabajadorId: string) => {
     setNuevosServicios(prev => ({
@@ -201,22 +245,37 @@ export default function Configuracion() {
     try {
       console.log('🔄 Intentando crear trabajador:', nuevoTrabajador);
       
-      // Horarios por defecto (Lunes a Viernes 9:00-18:00)
-      const horariosDefecto: HorariosTrabajo = {};
-      ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
-        horariosDefecto[dia] = [{ inicio: '09:00', fin: '18:00' }];
-      });
-      
-      const trabajadorData = {
+      // Preparar datos según columnas disponibles
+      let trabajadorData: any = {
         nombre: nuevoTrabajador.trim(),
         servicios: [],
         festivos: [],
         duracionCitaDefecto: 30,
-        horariosTrabajo: horariosDefecto,
-        tiempoDescanso: 0,
-        limiteDiasReserva: 30,
         user_id: user.id
       };
+
+      if (columnasExisten) {
+        // Horarios por defecto (Lunes a Viernes 9:00-18:00)
+        const horariosDefecto: HorariosTrabajo = {};
+        ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
+          horariosDefecto[dia] = [{ inicio: '09:00', fin: '18:00' }];
+        });
+        
+        trabajadorData = {
+          ...trabajadorData,
+          horariosTrabajo: horariosDefecto,
+          tiempoDescanso: 0,
+          limiteDiasReserva: 30,
+        };
+      } else {
+        // Formato antiguo
+        trabajadorData = {
+          ...trabajadorData,
+          horaInicio: '09:00',
+          horaFin: '18:00',
+          diasTrabajo: ['lunes', 'martes', 'miercoles', 'jueves', 'viernes']
+        };
+      }
 
       const { data, error } = await supabase
         .from('trabajadores')
@@ -229,14 +288,20 @@ export default function Configuracion() {
         throw error;
       }
 
+      // Crear objeto trabajador para el estado local
+      const horariosDefecto: HorariosTrabajo = {};
+      ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
+        horariosDefecto[dia] = [{ inicio: '09:00', fin: '18:00' }];
+      });
+
       const nuevoTrab = {
         id: data.id,
         nombre: data.nombre,
         servicios: [],
         festivos: data.festivos || [],
-        horariosTrabajo: data.horariosTrabajo || horariosDefecto,
-        tiempoDescanso: data.tiempoDescanso || 0,
-        limiteDiasReserva: data.limiteDiasReserva || 30,
+        horariosTrabajo: columnasExisten ? (data.horariosTrabajo || horariosDefecto) : horariosDefecto,
+        tiempoDescanso: columnasExisten ? (data.tiempoDescanso || 0) : 0,
+        limiteDiasReserva: columnasExisten ? (data.limiteDiasReserva || 30) : 30,
         user_id: data.user_id
       };
       
@@ -440,9 +505,12 @@ export default function Configuracion() {
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Agregar franja horaria
+  // 🔥 FUNCIÓN: Agregar franja horaria (solo si columnas existen)
   const agregarFranjaHoraria = async (trabajadorId: string, dia: string) => {
-    if (!user) return;
+    if (!user || !columnasExisten) {
+      showMessage("⚠️ Esta función requiere actualizar la base de datos");
+      return;
+    }
     
     try {
       const trabajador = trabajadores.find(t => t.id === trabajadorId);
@@ -478,9 +546,9 @@ export default function Configuracion() {
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Eliminar franja horaria
+  // 🔥 FUNCIÓN: Eliminar franja horaria (solo si columnas existen)
   const eliminarFranjaHoraria = async (trabajadorId: string, dia: string, indice: number) => {
-    if (!user) return;
+    if (!user || !columnasExisten) return;
     
     try {
       const trabajador = trabajadores.find(t => t.id === trabajadorId);
@@ -516,9 +584,9 @@ export default function Configuracion() {
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Actualizar franja horaria
+  // 🔥 FUNCIÓN: Actualizar franja horaria (solo si columnas existen)
   const actualizarFranjaHoraria = async (trabajadorId: string, dia: string, indice: number, campo: 'inicio' | 'fin', valor: string) => {
-    if (!user) return;
+    if (!user || !columnasExisten) return;
     
     try {
       const trabajador = trabajadores.find(t => t.id === trabajadorId);
@@ -550,9 +618,12 @@ export default function Configuracion() {
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Actualizar configuración avanzada
+  // 🔥 FUNCIÓN: Actualizar configuración avanzada (solo si columnas existen)
   const actualizarConfiguracionAvanzada = async (trabajadorId: string, campo: 'tiempoDescanso' | 'limiteDiasReserva', valor: number) => {
-    if (!user) return;
+    if (!user || !columnasExisten) {
+      showMessage("⚠️ Esta función requiere actualizar la base de datos");
+      return;
+    }
     
     try {
       const updateData = { [campo]: valor };
@@ -598,6 +669,32 @@ export default function Configuracion() {
     const totalFranjas = Object.values(horarios).reduce((total, franjas) => total + franjas.length, 0);
     return `${diasConHorarios} días • ${totalFranjas} franjas`;
   };
+
+  if (verificandoEstructura) {
+    return (
+      <div style={{ 
+        minHeight: '100vh', 
+        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem'
+      }}>
+        <div className="card" style={{ textAlign: 'center', maxWidth: '400px', width: '100%' }}>
+          <div style={{ 
+            width: '48px', 
+            height: '48px', 
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #667eea',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px'
+          }}></div>
+          <p style={{ color: '#666', fontSize: '1.1rem' }}>Verificando estructura de la base de datos...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading && trabajadores.length === 0) {
     return (
@@ -661,6 +758,59 @@ export default function Configuracion() {
               )}
             </div>
           </div>
+
+          {/* Alerta de estructura si es necesario */}
+          {!columnasExisten && (
+            <div style={{
+              background: '#fef3c7',
+              border: '1px solid #fbbf24',
+              borderRadius: '0.75rem',
+              padding: '1rem',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.75rem'
+            }}>
+              <AlertTriangle size={20} style={{ color: '#f59e0b', flexShrink: 0, marginTop: '0.125rem' }} />
+              <div style={{ flex: 1 }}>
+                <h3 style={{ fontSize: '0.875rem', fontWeight: '600', color: '#92400e', margin: '0 0 0.5rem 0' }}>
+                  Base de datos desactualizada
+                </h3>
+                <p style={{ fontSize: '0.75rem', color: '#78350f', margin: '0 0 0.75rem 0' }}>
+                  Para usar las funciones avanzadas (franjas horarias, tiempo de descanso), ejecuta este SQL en Supabase:
+                </p>
+                <code style={{ 
+                  display: 'block', 
+                  background: '#92400e20', 
+                  padding: '0.5rem', 
+                  borderRadius: '0.25rem', 
+                  fontSize: '0.75rem',
+                  fontFamily: 'monospace',
+                  color: '#92400e',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {`ALTER TABLE trabajadores 
+ADD COLUMN horariosTrabajo JSONB DEFAULT '{}',
+ADD COLUMN tiempoDescanso INTEGER DEFAULT 0,
+ADD COLUMN limiteDiasReserva INTEGER DEFAULT 30;`}
+                </code>
+                <button
+                  onClick={() => window.open('https://supabase.com/dashboard', '_blank')}
+                  style={{
+                    marginTop: '0.5rem',
+                    background: '#f59e0b',
+                    color: 'white',
+                    border: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '0.5rem',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Abrir Supabase Dashboard
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Message Toast */}
@@ -669,7 +819,7 @@ export default function Configuracion() {
             position: 'fixed',
             top: '1rem',
             right: '1rem',
-            background: message.includes('Error') ? '#ef4444' : '#10b981',
+            background: message.includes('Error') || message.includes('⚠️') ? '#ef4444' : '#10b981',
             color: 'white',
             padding: '0.75rem 1rem',
             borderRadius: '0.75rem',
@@ -756,7 +906,8 @@ export default function Configuracion() {
                           {trabajador.nombre}
                         </h3>
                         <p style={{ margin: '0.25rem 0 0 0', opacity: 0.9, fontSize: 'clamp(0.75rem, 2.5vw, 0.875rem)' }}>
-                          {trabajador.servicios.length} servicios • {obtenerResumenHorarios(trabajador.horariosTrabajo)} • {trabajador.tiempoDescanso}min descanso
+                          {trabajador.servicios.length} servicios • {obtenerResumenHorarios(trabajador.horariosTrabajo)}
+                          {columnasExisten && trabajador.tiempoDescanso > 0 && ` • ${trabajador.tiempoDescanso}min descanso`}
                         </p>
                       </div>
                     </div>
@@ -989,35 +1140,47 @@ export default function Configuracion() {
                         </div>
                       </div>
 
-                      {/* 🔥 NUEVA SECCIÓN: Horarios de Trabajo con Franjas */}
+                      {/* Horarios de Trabajo con Franjas */}
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                           <Clock size={20} style={{ color: '#3b82f6' }} />
                           <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
                             Horarios de Trabajo
+                            {!columnasExisten && (
+                              <span style={{ fontSize: '0.75rem', color: '#f59e0b', marginLeft: '0.5rem' }}>
+                                (Requiere actualización BD)
+                              </span>
+                            )}
                           </h4>
                         </div>
                         
-                        <div style={{ background: '#f0f9ff', padding: '1rem', borderRadius: '0.75rem', border: '1px solid #bfdbfe' }}>
+                        <div style={{ 
+                          background: columnasExisten ? '#f0f9ff' : '#fef3c7', 
+                          padding: '1rem', 
+                          borderRadius: '0.75rem', 
+                          border: `1px solid ${columnasExisten ? '#bfdbfe' : '#fbbf24'}`
+                        }}>
                           {diasSemana.map((dia) => (
                             <div key={dia.id} style={{ marginBottom: '1.5rem' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                                <h5 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e40af', margin: 0 }}>
+                                <h5 style={{ fontSize: '1rem', fontWeight: '600', color: columnasExisten ? '#1e40af' : '#92400e', margin: 0 }}>
                                   {dia.nombre}
                                 </h5>
                                 <button
                                   onClick={() => agregarFranjaHoraria(trabajador.id, dia.id)}
+                                  disabled={!columnasExisten}
                                   style={{
-                                    background: '#3b82f6',
+                                    background: columnasExisten ? '#3b82f6' : '#9ca3af',
                                     color: 'white',
                                     border: 'none',
                                     padding: '0.25rem 0.5rem',
                                     borderRadius: '0.25rem',
-                                    cursor: 'pointer',
+                                    cursor: columnasExisten ? 'pointer' : 'not-allowed',
                                     fontSize: '0.75rem',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: '0.25rem'
+                                    gap: '0.25rem',
+                                    opacity: columnasExisten ? 1 : 0.5
                                   }}
                                 >
                                   <Plus size={12} />
@@ -1025,7 +1188,6 @@ export default function Configuracion() {
                                 </button>
                               </div>
                               
-                              {/* Franjas horarias del día */}
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                 {trabajador.horariosTrabajo[dia.id]?.map((franja, index) => (
                                   <div key={index} style={{ 
@@ -1041,12 +1203,14 @@ export default function Configuracion() {
                                       type="time"
                                       value={franja.inicio}
                                       onChange={(e) => actualizarFranjaHoraria(trabajador.id, dia.id, index, 'inicio', e.target.value)}
+                                      disabled={!columnasExisten}
                                       style={{
                                         padding: '0.25rem',
                                         border: '1px solid #d1d5db',
                                         borderRadius: '0.25rem',
                                         fontSize: '0.75rem',
-                                        width: '80px'
+                                        width: '80px',
+                                        opacity: columnasExisten ? 1 : 0.7
                                       }}
                                     />
                                     <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>-</span>
@@ -1054,23 +1218,26 @@ export default function Configuracion() {
                                       type="time"
                                       value={franja.fin}
                                       onChange={(e) => actualizarFranjaHoraria(trabajador.id, dia.id, index, 'fin', e.target.value)}
+                                      disabled={!columnasExisten}
                                       style={{
                                         padding: '0.25rem',
                                         border: '1px solid #d1d5db',
                                         borderRadius: '0.25rem',
                                         fontSize: '0.75rem',
-                                        width: '80px'
+                                        width: '80px',
+                                        opacity: columnasExisten ? 1 : 0.7
                                       }}
                                     />
                                     <button
                                       onClick={() => eliminarFranjaHoraria(trabajador.id, dia.id, index)}
+                                      disabled={!columnasExisten}
                                       style={{
                                         background: 'transparent',
                                         border: 'none',
-                                        color: '#ef4444',
+                                        color: columnasExisten ? '#ef4444' : '#9ca3af',
                                         padding: '0.25rem',
                                         borderRadius: '0.25rem',
-                                        cursor: 'pointer',
+                                        cursor: columnasExisten ? 'pointer' : 'not-allowed',
                                         marginLeft: 'auto'
                                       }}
                                       title="Eliminar franja"
@@ -1095,77 +1262,77 @@ export default function Configuracion() {
                         </div>
                       </div>
 
-                      {/* 🔥 NUEVA SECCIÓN: Configuración Avanzada */}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                          <Settings size={20} style={{ color: '#f59e0b' }} />
-                          <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
-                            Configuración Avanzada
-                          </h4>
-                        </div>
+                      {/* Configuración Avanzada */}
+                      {columnasExisten && (
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                            <Settings size={20} style={{ color: '#f59e0b' }} />
+                            <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
+                              Configuración Avanzada
+                            </h4>
+                          </div>
 
-                        <div style={{ 
-                          background: '#fff7ed', 
-                          border: '1px solid #fed7aa', 
-                          borderRadius: '0.75rem', 
-                          padding: '1rem'
-                        }}>
-                          <div style={{ display: 'grid', gap: '1rem' }}>
-                            {/* Tiempo de Descanso */}
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Coffee size={16} />
-                                Tiempo de descanso entre citas (minutos)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                max="60"
-                                step="5"
-                                value={trabajador.tiempoDescanso}
-                                onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'tiempoDescanso', parseInt(e.target.value) || 0)}
-                                style={{
-                                  padding: '0.5rem',
-                                  border: '1px solid #fed7aa',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '80px',
-                                  textAlign: 'center'
-                                }}
-                              />
-                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
-                                Tiempo libre automático entre citas consecutivas
-                              </p>
-                            </div>
+                          <div style={{ 
+                            background: '#fff7ed', 
+                            border: '1px solid #fed7aa', 
+                            borderRadius: '0.75rem', 
+                            padding: '1rem'
+                          }}>
+                            <div style={{ display: 'grid', gap: '1rem' }}>
+                              <div>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
+                                  <Coffee size={16} />
+                                  Tiempo de descanso entre citas (minutos)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="60"
+                                  step="5"
+                                  value={trabajador.tiempoDescanso}
+                                  onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'tiempoDescanso', parseInt(e.target.value) || 0)}
+                                  style={{
+                                    padding: '0.5rem',
+                                    border: '1px solid #fed7aa',
+                                    borderRadius: '0.5rem',
+                                    fontSize: '0.875rem',
+                                    width: '80px',
+                                    textAlign: 'center'
+                                  }}
+                                />
+                                <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
+                                  Tiempo libre automático entre citas consecutivas
+                                </p>
+                              </div>
 
-                            {/* Límite de Reserva */}
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Shield size={16} />
-                                Límite de reserva (días de antelación)
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="365"
-                                value={trabajador.limiteDiasReserva}
-                                onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'limiteDiasReserva', parseInt(e.target.value) || 30)}
-                                style={{
-                                  padding: '0.5rem',
-                                  border: '1px solid #fed7aa',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '80px',
-                                  textAlign: 'center'
-                                }}
-                              />
-                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
-                                Los clientes podrán reservar hasta este número de días de antelación
-                              </p>
+                              <div>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
+                                  <Shield size={16} />
+                                  Límite de reserva (días de antelación)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="365"
+                                  value={trabajador.limiteDiasReserva}
+                                  onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'limiteDiasReserva', parseInt(e.target.value) || 30)}
+                                  style={{
+                                    padding: '0.5rem',
+                                    border: '1px solid #fed7aa',
+                                    borderRadius: '0.5rem',
+                                    fontSize: '0.875rem',
+                                    width: '80px',
+                                    textAlign: 'center'
+                                  }}
+                                />
+                                <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
+                                  Los clientes podrán reservar hasta este número de días de antelación
+                                </p>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Días Festivos */}
                       <div>
@@ -1176,7 +1343,6 @@ export default function Configuracion() {
                           </h4>
                         </div>
 
-                        {/* Formulario para agregar festivo */}
                         <div style={{ 
                           background: '#f8f9fa', 
                           padding: '1rem', 
@@ -1233,7 +1399,6 @@ export default function Configuracion() {
                           </div>
                         </div>
 
-                        {/* Lista de Días Festivos */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                           {trabajador.festivos.map((fecha) => (
                             <div key={`festivo-${trabajador.id}-${fecha}`} 
