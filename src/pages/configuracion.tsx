@@ -47,11 +47,13 @@ interface User {
 interface TrabajadorData {
   id: string;
   nombre: string;
-  servicios: number[];
-  festivos: string[];
-  duraccionCitaDefecto?: number;
+  apellido?: string;
+  horarios?: any;
+  servicios: any;
+  festivos: any;
+  duracionCitaDefecto?: number;
   // Nuevas columnas (lowercase como aparecen en Supabase)
-  horariostrabajo?: HorariosTrabajo;
+  horariostrabajos?: HorariosTrabajo;
   tiempodescanso?: number;
   limitediasreserva?: number;
   user_id: string;
@@ -98,10 +100,10 @@ export default function Configuracion() {
       if (errorServicios) throw errorServicios;
       setServiciosGlobales(servicios || []);
 
-      // Cargar trabajadores - usar nombres en lowercase como aparecen en Supabase
+      // Cargar trabajadores - usar solo columnas que SÍ existen
       const { data: trabajadoresData, error: errorTrabajadores } = await supabase
         .from('trabajadores')
-        .select('id, nombre, servicios, festivos, duraccionCitaDefecto, horariostrabajo, tiempodescanso, limitediasreserva, user_id')
+        .select('id, nombre, apellido, horarios, servicios, festivos, duracionCitaDefecto, horariostrabajos, tiempodescanso, limitediasreserva, user_id')
         .eq('user_id', userId);
 
       if (errorTrabajadores) {
@@ -113,11 +115,34 @@ export default function Configuracion() {
 
       // Procesar trabajadores
       const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => {
-        // Horarios - usar nuevas columnas
+        // Procesar servicios - manejar diferentes formatos
+        let serviciosProcesados: Servicio[] = [];
+        if (t.servicios) {
+          if (Array.isArray(t.servicios)) {
+            // Si es array de IDs
+            serviciosProcesados = t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [];
+          } else if (typeof t.servicios === 'number') {
+            // Si es un solo ID
+            const servicio = servicios?.find(s => s.id === t.servicios);
+            if (servicio) serviciosProcesados = [servicio];
+          }
+        }
+
+        // Procesar festivos - manejar diferentes formatos
+        let festivosProcesados: string[] = [];
+        if (t.festivos) {
+          if (Array.isArray(t.festivos)) {
+            festivosProcesados = t.festivos;
+          } else if (typeof t.festivos === 'string') {
+            festivosProcesados = [t.festivos];
+          }
+        }
+
+        // Horarios - usar nuevas columnas si existen
         let horariosTrabajo: HorariosTrabajo = {};
         
-        if (t.horariostrabajo && Object.keys(t.horariostrabajo).length > 0) {
-          horariosTrabajo = t.horariostrabajo;
+        if (t.horariostrabajos && Object.keys(t.horariostrabajos).length > 0) {
+          horariosTrabajo = t.horariostrabajos;
         } else {
           // Configuración por defecto
           ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
@@ -131,13 +156,11 @@ export default function Configuracion() {
         return {
           id: t.id,
           nombre: t.nombre,
-          servicios: t.servicios ? 
-            t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
-            : [],
-          festivos: t.festivos || [],
+          servicios: serviciosProcesados,
+          festivos: festivosProcesados,
           horariosTrabajo,
           tiempoDescanso: t.tiempodescanso || 0,
-          limiteDiasReserva: t.limitediasreserva || t.duraccionCitaDefecto || 30,
+          limiteDiasReserva: t.limitediasreserva || t.duracionCitaDefecto || 30,
           user_id: t.user_id
         };
       });
@@ -203,13 +226,13 @@ export default function Configuracion() {
         horariosDefecto[dia] = [{ inicio: '09:00', fin: '18:00' }];
       });
       
-      // Usar nombres en lowercase para Supabase
+      // Usar solo los campos que SÍ existen en Supabase
       const trabajadorData = {
         nombre: nuevoTrabajador.trim(),
-        servicios: [],
-        festivos: [],
-        duraccionCitaDefecto: 30,
-        horariostrabajo: horariosDefecto,
+        servicios: [], // Array vacío
+        festivos: [], // Array vacío
+        duracionCitaDefecto: 30, // Nombre correcto
+        horariostrabajos: horariosDefecto,
         tiempodescanso: 0,
         limitediasreserva: 30,
         user_id: user.id
@@ -232,8 +255,8 @@ export default function Configuracion() {
         id: data.id,
         nombre: data.nombre,
         servicios: [],
-        festivos: data.festivos || [],
-        horariosTrabajo: data.horariostrabajo || horariosDefecto,
+        festivos: Array.isArray(data.festivos) ? data.festivos : [],
+        horariosTrabajo: data.horariostrabajos || horariosDefecto,
         tiempoDescanso: data.tiempodescanso || 0,
         limiteDiasReserva: data.limitediasreserva || 30,
         user_id: data.user_id
@@ -458,7 +481,7 @@ export default function Configuracion() {
       // Usar nombre en lowercase para Supabase
       const { error } = await supabase
         .from('trabajadores')
-        .update({ horariostrabajo: nuevosHorarios })
+        .update({ horariostrabajos: nuevosHorarios })
         .eq('id', trabajadorId)
         .eq('user_id', user.id);
 
@@ -497,7 +520,7 @@ export default function Configuracion() {
       // Usar nombre en lowercase para Supabase
       const { error } = await supabase
         .from('trabajadores')
-        .update({ horariostrabajo: nuevosHorarios })
+        .update({ horariostrabajos: nuevosHorarios })
         .eq('id', trabajadorId)
         .eq('user_id', user.id);
 
@@ -533,7 +556,7 @@ export default function Configuracion() {
       // Usar nombre en lowercase para Supabase
       const { error } = await supabase
         .from('trabajadores')
-        .update({ horariostrabajo: nuevosHorarios })
+        .update({ horariostrabajos: nuevosHorarios })
         .eq('id', trabajadorId)
         .eq('user_id', user.id);
 
