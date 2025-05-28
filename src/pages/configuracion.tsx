@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, ChevronDown, ChevronUp, Euro, X, Coffee } from "lucide-react";
+import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Eye, EyeOff, AlertCircle, Euro } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useRouter } from "next/router";
 
@@ -12,22 +12,11 @@ interface Servicio {
   user_id?: string;
 }
 
-interface FranjaHoraria {
-  inicio: string;
-  fin: string;
-}
-
-interface HorariosTrabajo {
-  [key: string]: FranjaHoraria[];
-}
-
 interface Trabajador {
   id: string;
   nombre: string;
   servicios: Servicio[];
   festivos: string[];
-  horariosTrabajo: HorariosTrabajo;
-  tiempoDescanso: number;
   limiteDiasReserva: number;
   user_id?: string;
 }
@@ -47,27 +36,11 @@ interface User {
 interface TrabajadorData {
   id: string;
   nombre: string;
-  apellido?: string;
-  horarios?: any;
-  servicios: any;
-  festivos: any;
-  duracionCitaDefecto?: number;
-  // Nuevas columnas (lowercase como aparecen en Supabase)
-  horariostrabajos?: HorariosTrabajo;
-  tiempodescanso?: number;
-  limitediasreserva?: number;
+  servicios: number[];
+  festivos: string[];
+  duracionCitaDefecto: number;
   user_id: string;
 }
-
-const diasSemana = [
-  { id: 'lunes', nombre: 'Lunes', abrev: 'L' },
-  { id: 'martes', nombre: 'Martes', abrev: 'M' },
-  { id: 'miercoles', nombre: 'Miércoles', abrev: 'X' },
-  { id: 'jueves', nombre: 'Jueves', abrev: 'J' },
-  { id: 'viernes', nombre: 'Viernes', abrev: 'V' },
-  { id: 'sabado', nombre: 'Sábado', abrev: 'S' },
-  { id: 'domingo', nombre: 'Domingo', abrev: 'D' }
-];
 
 export default function Configuracion() {
   const router = useRouter();
@@ -83,14 +56,12 @@ export default function Configuracion() {
 
   const showMessage = (msg: string) => {
     setMessage(msg);
-    setTimeout(() => setMessage(""), 4000);
+    setTimeout(() => setMessage(""), 3000);
   };
 
   const cargarDatos = useCallback(async (userId: string) => {
     setIsLoading(true);
     try {
-      console.log('🔄 Cargando datos...');
-      
       // Cargar servicios globales
       const { data: servicios, error: errorServicios } = await supabase
         .from('servicios')
@@ -100,70 +71,25 @@ export default function Configuracion() {
       if (errorServicios) throw errorServicios;
       setServiciosGlobales(servicios || []);
 
-      // Cargar trabajadores - usar solo columnas que SÍ existen
+      // Cargar trabajadores
       const { data: trabajadoresData, error: errorTrabajadores } = await supabase
         .from('trabajadores')
-        .select('id, nombre, apellido, horarios, servicios, festivos, duracionCitaDefecto, horariostrabajos, tiempodescanso, limitediasreserva, user_id')
+        .select('*')
         .eq('user_id', userId);
 
-      if (errorTrabajadores) {
-        console.error('❌ Error cargando trabajadores:', errorTrabajadores);
-        throw errorTrabajadores;
-      }
+      if (errorTrabajadores) throw errorTrabajadores;
 
-      console.log('✅ Datos cargados:', trabajadoresData);
-
-      // Procesar trabajadores
-      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => {
-        // Procesar servicios - manejar diferentes formatos
-        let serviciosProcesados: Servicio[] = [];
-        if (t.servicios) {
-          if (Array.isArray(t.servicios)) {
-            // Si es array de IDs
-            serviciosProcesados = t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [];
-          } else if (typeof t.servicios === 'number') {
-            // Si es un solo ID
-            const servicio = servicios?.find(s => s.id === t.servicios);
-            if (servicio) serviciosProcesados = [servicio];
-          }
-        }
-
-        // Procesar festivos - manejar diferentes formatos
-        let festivosProcesados: string[] = [];
-        if (t.festivos) {
-          if (Array.isArray(t.festivos)) {
-            festivosProcesados = t.festivos;
-          } else if (typeof t.festivos === 'string') {
-            festivosProcesados = [t.festivos];
-          }
-        }
-
-        // Horarios - usar nuevas columnas si existen
-        let horariosTrabajo: HorariosTrabajo = {};
-        
-        if (t.horariostrabajos && Object.keys(t.horariostrabajos).length > 0) {
-          horariosTrabajo = t.horariostrabajos;
-        } else {
-          // Configuración por defecto
-          ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
-            horariosTrabajo[dia] = [{
-              inicio: '09:00',
-              fin: '18:00'
-            }];
-          });
-        }
-
-        return {
-          id: t.id,
-          nombre: t.nombre,
-          servicios: serviciosProcesados,
-          festivos: festivosProcesados,
-          horariosTrabajo,
-          tiempoDescanso: t.tiempodescanso || 0,
-          limiteDiasReserva: t.limitediasreserva || t.duracionCitaDefecto || 30,
-          user_id: t.user_id
-        };
-      });
+      // Procesar trabajadores con sus servicios
+      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => ({
+        id: t.id,
+        nombre: t.nombre,
+        servicios: t.servicios ? 
+          t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
+          : [],
+        festivos: t.festivos || [],
+        limiteDiasReserva: t.duracionCitaDefecto || 30,
+        user_id: t.user_id
+      }));
 
       setTrabajadores(trabajadoresProcesados);
       
@@ -175,7 +101,7 @@ export default function Configuracion() {
       }
 
     } catch (error) {
-      console.error('❌ Error cargando datos:', error);
+      console.error('Error cargando datos:', error);
       showMessage('Error cargando configuración');
     } finally {
       setIsLoading(false);
@@ -220,21 +146,11 @@ export default function Configuracion() {
     try {
       console.log('🔄 Intentando crear trabajador:', nuevoTrabajador);
       
-      // Horarios por defecto (Lunes a Viernes 9:00-18:00)
-      const horariosDefecto: HorariosTrabajo = {};
-      ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'].forEach(dia => {
-        horariosDefecto[dia] = [{ inicio: '09:00', fin: '18:00' }];
-      });
-      
-      // Usar solo los campos que SÍ existen en Supabase
       const trabajadorData = {
         nombre: nuevoTrabajador.trim(),
-        servicios: [], // Array vacío
-        festivos: [], // Array vacío
-        duracionCitaDefecto: 30, // Nombre correcto
-        horariostrabajos: horariosDefecto,
-        tiempodescanso: 0,
-        limitediasreserva: 30,
+        servicios: [],
+        festivos: [],
+        duracionCitaDefecto: 30,
         user_id: user.id
       };
 
@@ -249,16 +165,12 @@ export default function Configuracion() {
         throw error;
       }
 
-      console.log('✅ Trabajador creado:', data);
-
       const nuevoTrab = {
         id: data.id,
         nombre: data.nombre,
         servicios: [],
-        festivos: Array.isArray(data.festivos) ? data.festivos : [],
-        horariosTrabajo: data.horariostrabajos || horariosDefecto,
-        tiempoDescanso: data.tiempodescanso || 0,
-        limiteDiasReserva: data.limitediasreserva || 30,
+        festivos: data.festivos || [],
+        limiteDiasReserva: data.duracionCitaDefecto || 30,
         user_id: data.user_id
       };
       
@@ -299,6 +211,7 @@ export default function Configuracion() {
     }
   };
 
+  // 🔥 NUEVA FUNCIÓN: Agregar servicio
   const agregarServicio = async (trabajadorId: string) => {
     const nuevoServicio = nuevosServicios[trabajadorId];
     if (!nuevoServicio || !nuevoServicio.nombre.trim() || !user) return;
@@ -357,6 +270,7 @@ export default function Configuracion() {
     }
   };
 
+  // 🔥 NUEVA FUNCIÓN: Eliminar servicio
   const eliminarServicio = async (trabajadorId: string, servicioId: number) => {
     if (!user || !confirm('¿Estás seguro de que quieres quitar este servicio del trabajador?')) return;
     
@@ -389,6 +303,7 @@ export default function Configuracion() {
     }
   };
 
+  // 🔥 NUEVA FUNCIÓN: Agregar festivo
   const agregarFestivo = async (trabajadorId: string) => {
     const nuevaFecha = nuevasFechasFestivas[trabajadorId];
     if (!nuevaFecha || !user) return;
@@ -431,6 +346,7 @@ export default function Configuracion() {
     }
   };
 
+  // 🔥 NUEVA FUNCIÓN: Eliminar festivo
   const eliminarFestivo = async (trabajadorId: string, fecha: string) => {
     if (!user || !confirm('¿Estás seguro de que quieres quitar este día festivo?')) return;
     
@@ -462,150 +378,6 @@ export default function Configuracion() {
     }
   };
 
-  // 🔥 FUNCIÓN: Agregar franja horaria
-  const agregarFranjaHoraria = async (trabajadorId: string, dia: string) => {
-    if (!user) return;
-    
-    try {
-      const trabajador = trabajadores.find(t => t.id === trabajadorId);
-      if (!trabajador) return;
-
-      const nuevosHorarios = { ...trabajador.horariosTrabajo };
-      if (!nuevosHorarios[dia]) {
-        nuevosHorarios[dia] = [];
-      }
-      
-      // Agregar nueva franja por defecto
-      nuevosHorarios[dia].push({ inicio: '09:00', fin: '18:00' });
-
-      // Usar nombre en lowercase para Supabase
-      const { error } = await supabase
-        .from('trabajadores')
-        .update({ horariostrabajos: nuevosHorarios })
-        .eq('id', trabajadorId)
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      setTrabajadores(trabajadores.map(t => {
-        if (t.id === trabajadorId) {
-          return { ...t, horariosTrabajo: nuevosHorarios };
-        }
-        return t;
-      }));
-      
-      showMessage("Franja horaria agregada");
-    } catch (error) {
-      console.error('Error agregando franja horaria:', error);
-      showMessage("Error agregando franja horaria");
-    }
-  };
-
-  // 🔥 FUNCIÓN: Eliminar franja horaria
-  const eliminarFranjaHoraria = async (trabajadorId: string, dia: string, indice: number) => {
-    if (!user) return;
-    
-    try {
-      const trabajador = trabajadores.find(t => t.id === trabajadorId);
-      if (!trabajador) return;
-
-      const nuevosHorarios = { ...trabajador.horariosTrabajo };
-      if (nuevosHorarios[dia] && nuevosHorarios[dia].length > 1) {
-        nuevosHorarios[dia].splice(indice, 1);
-      } else {
-        // Si solo hay una franja, la eliminamos pero dejamos el día sin horarios
-        delete nuevosHorarios[dia];
-      }
-
-      // Usar nombre en lowercase para Supabase
-      const { error } = await supabase
-        .from('trabajadores')
-        .update({ horariostrabajos: nuevosHorarios })
-        .eq('id', trabajadorId)
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      setTrabajadores(trabajadores.map(t => {
-        if (t.id === trabajadorId) {
-          return { ...t, horariosTrabajo: nuevosHorarios };
-        }
-        return t;
-      }));
-      
-      showMessage("Franja horaria eliminada");
-    } catch (error) {
-      console.error('Error eliminando franja horaria:', error);
-      showMessage("Error eliminando franja horaria");
-    }
-  };
-
-  // 🔥 FUNCIÓN: Actualizar franja horaria
-  const actualizarFranjaHoraria = async (trabajadorId: string, dia: string, indice: number, campo: 'inicio' | 'fin', valor: string) => {
-    if (!user) return;
-    
-    try {
-      const trabajador = trabajadores.find(t => t.id === trabajadorId);
-      if (!trabajador) return;
-
-      const nuevosHorarios = { ...trabajador.horariosTrabajo };
-      if (nuevosHorarios[dia] && nuevosHorarios[dia][indice]) {
-        nuevosHorarios[dia][indice][campo] = valor;
-      }
-
-      // Usar nombre en lowercase para Supabase
-      const { error } = await supabase
-        .from('trabajadores')
-        .update({ horariostrabajos: nuevosHorarios })
-        .eq('id', trabajadorId)
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      setTrabajadores(trabajadores.map(t => {
-        if (t.id === trabajadorId) {
-          return { ...t, horariosTrabajo: nuevosHorarios };
-        }
-        return t;
-      }));
-      
-    } catch (error) {
-      console.error('Error actualizando franja horaria:', error);
-      showMessage("Error actualizando franja horaria");
-    }
-  };
-
-  // 🔥 FUNCIÓN: Actualizar configuración avanzada
-  const actualizarConfiguracionAvanzada = async (trabajadorId: string, campo: 'tiempoDescanso' | 'limiteDiasReserva', valor: number) => {
-    if (!user) return;
-    
-    try {
-      // Mapear nombres para Supabase (lowercase)
-      const campoSupabase = campo === 'tiempoDescanso' ? 'tiempodescanso' : 'limitediasreserva';
-      const updateData = { [campoSupabase]: valor };
-      
-      const { error } = await supabase
-        .from('trabajadores')
-        .update(updateData)
-        .eq('id', trabajadorId)
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      setTrabajadores(trabajadores.map(t => {
-        if (t.id === trabajadorId) {
-          return { ...t, [campo]: valor };
-        }
-        return t;
-      }));
-      
-      showMessage("Configuración actualizada");
-    } catch (error) {
-      console.error('Error actualizando configuración:', error);
-      showMessage("Error actualizando configuración");
-    }
-  };
-
   const formatearFecha = (fecha: string): string => {
     return new Date(fecha).toLocaleDateString('es-ES', {
       day: 'numeric',
@@ -616,14 +388,6 @@ export default function Configuracion() {
 
   const toggleTrabajador = (id: string) => {
     setTrabajadorExpandido(trabajadorExpandido === id ? null : id);
-  };
-
-  const obtenerResumenHorarios = (horarios: HorariosTrabajo): string => {
-    const diasConHorarios = Object.keys(horarios).length;
-    if (diasConHorarios === 0) return "Sin horarios";
-    
-    const totalFranjas = Object.values(horarios).reduce((total, franjas) => total + franjas.length, 0);
-    return `${diasConHorarios} días • ${totalFranjas} franjas`;
   };
 
   if (isLoading && trabajadores.length === 0) {
@@ -679,7 +443,7 @@ export default function Configuracion() {
                 Configuración del Negocio
               </h1>
               <p style={{ color: '#666', margin: '0.5rem 0 0 0', fontSize: 'clamp(0.875rem, 2.5vw, 1rem)' }}>
-                Gestiona tu equipo, servicios y horarios de trabajo
+                Gestiona tu equipo, servicios y disponibilidad
               </p>
               {user && (
                 <p style={{ color: '#667eea', fontSize: '0.75rem', margin: '0.25rem 0 0 0' }}>
@@ -718,7 +482,7 @@ export default function Configuracion() {
               Agregar Nuevo Trabajador
             </h2>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
             <input
               value={nuevoTrabajador}
               onChange={(e) => setNuevoTrabajador(e.target.value)}
@@ -739,8 +503,7 @@ export default function Configuracion() {
                 gap: '0.5rem',
                 opacity: (!nuevoTrabajador.trim() || isLoading) ? 0.6 : 1,
                 padding: '0.75rem 1rem',
-                fontSize: '0.875rem',
-                width: '100%'
+                fontSize: '0.875rem'
               }}
             >
               <Plus size={16} />
@@ -783,8 +546,7 @@ export default function Configuracion() {
                           {trabajador.nombre}
                         </h3>
                         <p style={{ margin: '0.25rem 0 0 0', opacity: 0.9, fontSize: 'clamp(0.75rem, 2.5vw, 0.875rem)' }}>
-                          {trabajador.servicios.length} servicios • {obtenerResumenHorarios(trabajador.horariosTrabajo)}
-                          {trabajador.tiempoDescanso > 0 && ` • ${trabajador.tiempoDescanso}min descanso`}
+                          {trabajador.servicios.length} servicios • {trabajador.festivos.length} días festivos
                         </p>
                       </div>
                     </div>
@@ -841,92 +603,67 @@ export default function Configuracion() {
                           marginBottom: '1rem',
                           border: '1px solid #e9ecef'
                         }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                                Nombre del servicio
-                              </label>
+                          <div style={{ display: 'grid', gap: '0.75rem' }}>
+                            <input
+                              type="text"
+                              placeholder="Nombre del servicio"
+                              value={nuevosServicios[trabajador.id]?.nombre || ''}
+                              onChange={(e) => setNuevosServicios(prev => ({
+                                ...prev,
+                                [trabajador.id]: {
+                                  ...prev[trabajador.id],
+                                  nombre: e.target.value
+                                }
+                              }))}
+                              style={{ 
+                                padding: '0.75rem', 
+                                border: '1px solid #ddd', 
+                                borderRadius: '0.5rem',
+                                fontSize: '0.875rem',
+                                width: '100%'
+                              }}
+                            />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                               <input
-                                type="text"
-                                placeholder="Ej: Corte de pelo"
-                                value={nuevosServicios[trabajador.id]?.nombre || ''}
+                                type="number"
+                                placeholder="Duración (min)"
+                                value={nuevosServicios[trabajador.id]?.duracion || 30}
                                 onChange={(e) => setNuevosServicios(prev => ({
                                   ...prev,
                                   [trabajador.id]: {
                                     ...prev[trabajador.id],
-                                    nombre: e.target.value
+                                    duracion: parseInt(e.target.value) || 30
                                   }
                                 }))}
                                 style={{ 
                                   padding: '0.75rem', 
                                   border: '1px solid #ddd', 
                                   borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '100%',
-                                  boxSizing: 'border-box'
+                                  fontSize: '0.875rem'
                                 }}
+                                min="1"
+                              />
+                              <input
+                                type="number"
+                                placeholder="Precio (€)"
+                                value={nuevosServicios[trabajador.id]?.precio || 0}
+                                onChange={(e) => setNuevosServicios(prev => ({
+                                  ...prev,
+                                  [trabajador.id]: {
+                                    ...prev[trabajador.id],
+                                    precio: parseFloat(e.target.value) || 0
+                                  }
+                                }))}
+                                style={{ 
+                                  padding: '0.75rem', 
+                                  border: '1px solid #ddd', 
+                                  borderRadius: '0.5rem',
+                                  fontSize: '0.875rem'
+                                }}
+                                min="0"
+                                step="0.01"
                               />
                             </div>
-                            
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                              <div>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                                  <Clock size={14} />
-                                  Duración (min)
-                                </label>
-                                <input
-                                  type="number"
-                                  placeholder="30"
-                                  value={nuevosServicios[trabajador.id]?.duracion || 30}
-                                  onChange={(e) => setNuevosServicios(prev => ({
-                                    ...prev,
-                                    [trabajador.id]: {
-                                      ...prev[trabajador.id],
-                                      duracion: parseInt(e.target.value) || 30
-                                    }
-                                  }))}
-                                  style={{ 
-                                    padding: '0.75rem', 
-                                    border: '1px solid #ddd', 
-                                    borderRadius: '0.5rem',
-                                    fontSize: '0.875rem',
-                                    width: '100%',
-                                    boxSizing: 'border-box'
-                                  }}
-                                  min="1"
-                                />
-                              </div>
-                              
-                              <div>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                                  <Euro size={14} />
-                                  Precio (€)
-                                </label>
-                                <input
-                                  type="number"
-                                  placeholder="0"
-                                  value={nuevosServicios[trabajador.id]?.precio || 0}
-                                  onChange={(e) => setNuevosServicios(prev => ({
-                                    ...prev,
-                                    [trabajador.id]: {
-                                      ...prev[trabajador.id],
-                                      precio: parseFloat(e.target.value) || 0
-                                    }
-                                  }))}
-                                  style={{ 
-                                    padding: '0.75rem', 
-                                    border: '1px solid #ddd', 
-                                    borderRadius: '0.5rem',
-                                    fontSize: '0.875rem',
-                                    width: '100%',
-                                    boxSizing: 'border-box'
-                                  }}
-                                  min="0"
-                                  step="0.01"
-                                />
-                              </div>
-                            </div>
-                            
                             <button
                               onClick={() => agregarServicio(trabajador.id)}
                               disabled={!nuevosServicios[trabajador.id]?.nombre?.trim()}
@@ -943,8 +680,7 @@ export default function Configuracion() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                gap: '0.5rem',
-                                width: '100%'
+                                gap: '0.5rem'
                               }}
                             >
                               <Plus size={16} />
@@ -971,13 +707,10 @@ export default function Configuracion() {
                                 <h5 style={{ fontWeight: '600', color: '#1a202c', margin: 0, fontSize: '0.9rem' }}>
                                   {servicio.nombre}
                                 </h5>
-                                <p style={{ color: '#666', margin: '0.25rem 0 0 0', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                    <Clock size={12} />
-                                    {servicio.duracion} min
-                                  </span>
+                                <p style={{ color: '#666', margin: '0.25rem 0 0 0', fontSize: '0.8rem' }}>
+                                  {servicio.duracion} min
                                   {servicio.precio > 0 && (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                    <span style={{ marginLeft: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                                       <Euro size={12} />
                                       {servicio.precio}
                                     </span>
@@ -1017,181 +750,6 @@ export default function Configuracion() {
                         </div>
                       </div>
 
-                      {/* Horarios de Trabajo con Franjas */}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                          <Clock size={20} style={{ color: '#3b82f6' }} />
-                          <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
-                            Horarios de Trabajo
-                          </h4>
-                        </div>
-                        
-                        <div style={{ background: '#f0f9ff', padding: '1rem', borderRadius: '0.75rem', border: '1px solid #bfdbfe' }}>
-                          {diasSemana.map((dia) => (
-                            <div key={dia.id} style={{ marginBottom: '1.5rem' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                                <h5 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e40af', margin: 0 }}>
-                                  {dia.nombre}
-                                </h5>
-                                <button
-                                  onClick={() => agregarFranjaHoraria(trabajador.id, dia.id)}
-                                  style={{
-                                    background: '#3b82f6',
-                                    color: 'white',
-                                    border: 'none',
-                                    padding: '0.25rem 0.5rem',
-                                    borderRadius: '0.25rem',
-                                    cursor: 'pointer',
-                                    fontSize: '0.75rem',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem'
-                                  }}
-                                >
-                                  <Plus size={12} />
-                                  Franja
-                                </button>
-                              </div>
-                              
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                {trabajador.horariosTrabajo[dia.id]?.map((franja, index) => (
-                                  <div key={index} style={{ 
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.5rem',
-                                    background: 'white',
-                                    borderRadius: '0.5rem',
-                                    border: '1px solid #d1d5db'
-                                  }}>
-                                    <input
-                                      type="time"
-                                      value={franja.inicio}
-                                      onChange={(e) => actualizarFranjaHoraria(trabajador.id, dia.id, index, 'inicio', e.target.value)}
-                                      style={{
-                                        padding: '0.25rem',
-                                        border: '1px solid #d1d5db',
-                                        borderRadius: '0.25rem',
-                                        fontSize: '0.75rem',
-                                        width: '80px'
-                                      }}
-                                    />
-                                    <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>-</span>
-                                    <input
-                                      type="time"
-                                      value={franja.fin}
-                                      onChange={(e) => actualizarFranjaHoraria(trabajador.id, dia.id, index, 'fin', e.target.value)}
-                                      style={{
-                                        padding: '0.25rem',
-                                        border: '1px solid #d1d5db',
-                                        borderRadius: '0.25rem',
-                                        fontSize: '0.75rem',
-                                        width: '80px'
-                                      }}
-                                    />
-                                    <button
-                                      onClick={() => eliminarFranjaHoraria(trabajador.id, dia.id, index)}
-                                      style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        color: '#ef4444',
-                                        padding: '0.25rem',
-                                        borderRadius: '0.25rem',
-                                        cursor: 'pointer',
-                                        marginLeft: 'auto'
-                                      }}
-                                      title="Eliminar franja"
-                                    >
-                                      <X size={14} />
-                                    </button>
-                                  </div>
-                                )) || (
-                                  <div style={{ 
-                                    textAlign: 'center', 
-                                    padding: '1rem', 
-                                    color: '#6b7280', 
-                                    fontSize: '0.875rem',
-                                    fontStyle: 'italic'
-                                  }}>
-                                    Sin horarios configurados
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Configuración Avanzada */}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                          <Settings size={20} style={{ color: '#f59e0b' }} />
-                          <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
-                            Configuración Avanzada
-                          </h4>
-                        </div>
-
-                        <div style={{ 
-                          background: '#fff7ed', 
-                          border: '1px solid #fed7aa', 
-                          borderRadius: '0.75rem', 
-                          padding: '1rem'
-                        }}>
-                          <div style={{ display: 'grid', gap: '1rem' }}>
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Coffee size={16} />
-                                Tiempo de descanso entre citas (minutos)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                max="60"
-                                step="5"
-                                value={trabajador.tiempoDescanso}
-                                onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'tiempoDescanso', parseInt(e.target.value) || 0)}
-                                style={{
-                                  padding: '0.5rem',
-                                  border: '1px solid #fed7aa',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '80px',
-                                  textAlign: 'center'
-                                }}
-                              />
-                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
-                                Tiempo libre automático entre citas consecutivas
-                              </p>
-                            </div>
-
-                            <div>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
-                                <Shield size={16} />
-                                Límite de reserva (días de antelación)
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="365"
-                                value={trabajador.limiteDiasReserva}
-                                onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'limiteDiasReserva', parseInt(e.target.value) || 30)}
-                                style={{
-                                  padding: '0.5rem',
-                                  border: '1px solid #fed7aa',
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '80px',
-                                  textAlign: 'center'
-                                }}
-                              />
-                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
-                                Los clientes podrán reservar hasta este número de días de antelación
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
                       {/* Días Festivos */}
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -1201,6 +759,7 @@ export default function Configuracion() {
                           </h4>
                         </div>
 
+                        {/* Formulario para agregar festivo */}
                         <div style={{ 
                           background: '#f8f9fa', 
                           padding: '1rem', 
@@ -1209,28 +768,22 @@ export default function Configuracion() {
                           border: '1px solid #e9ecef'
                         }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', color: '#374151', marginBottom: '0.5rem' }}>
-                                Seleccionar fecha
-                              </label>
-                              <input
-                                type="date"
-                                value={nuevasFechasFestivas[trabajador.id] || ''}
-                                onChange={(e) => setNuevasFechasFestivas(prev => ({
-                                  ...prev,
-                                  [trabajador.id]: e.target.value
-                                }))}
-                                min={new Date().toISOString().split('T')[0]}
-                                style={{ 
-                                  padding: '0.75rem', 
-                                  border: '1px solid #ddd', 
-                                  borderRadius: '0.5rem',
-                                  fontSize: '0.875rem',
-                                  width: '100%',
-                                  boxSizing: 'border-box'
-                                }}
-                              />
-                            </div>
+                            <input
+                              type="date"
+                              value={nuevasFechasFestivas[trabajador.id] || ''}
+                              onChange={(e) => setNuevasFechasFestivas(prev => ({
+                                ...prev,
+                                [trabajador.id]: e.target.value
+                              }))}
+                              min={new Date().toISOString().split('T')[0]}
+                              style={{ 
+                                padding: '0.75rem', 
+                                border: '1px solid #ddd', 
+                                borderRadius: '0.5rem',
+                                fontSize: '0.875rem',
+                                width: '100%'
+                              }}
+                            />
                             <button
                               onClick={() => agregarFestivo(trabajador.id)}
                               disabled={!nuevasFechasFestivas[trabajador.id]}
@@ -1247,8 +800,7 @@ export default function Configuracion() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                gap: '0.5rem',
-                                width: '100%'
+                                gap: '0.5rem'
                               }}
                             >
                               <Plus size={16} />
@@ -1257,7 +809,8 @@ export default function Configuracion() {
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {/* Lista de Días Festivos */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
                           {trabajador.festivos.map((fecha) => (
                             <div key={`festivo-${trabajador.id}-${fecha}`} 
                                  style={{ 
@@ -1303,6 +856,24 @@ export default function Configuracion() {
                               <p style={{ color: '#666', margin: 0, fontSize: '0.875rem' }}>No hay días festivos configurados</p>
                             </div>
                           )}
+                        </div>
+
+                        {/* Límite de Reserva */}
+                        <div style={{ 
+                          background: '#fff7ed', 
+                          border: '1px solid #fed7aa', 
+                          borderRadius: '0.75rem', 
+                          padding: '1rem' 
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                            <Shield size={18} style={{ color: '#ea580c' }} />
+                            <h4 style={{ fontSize: '1rem', fontWeight: '600', color: '#ea580c', margin: 0 }}>
+                              Límite de Reserva
+                            </h4>
+                          </div>
+                          <p style={{ color: '#9a3412', margin: 0, fontSize: '0.875rem' }}>
+                            Los clientes podrán reservar hasta <strong>{trabajador.limiteDiasReserva} días</strong> de antelación.
+                          </p>
                         </div>
                       </div>
                     </div>
