@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Settings, User, Clock, Calendar, Trash2, Plus, ChevronDown, ChevronUp, Euro, X } from "lucide-react";
+import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, ChevronDown, ChevronUp, Euro, X, Coffee } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useRouter } from "next/router";
 
@@ -27,6 +27,8 @@ interface Trabajador {
   servicios: Servicio[];
   festivos: string[];
   horariosTrabajo: HorariosTrabajo;
+  tiempoDescanso: number;
+  limiteDiasReserva: number;
   user_id?: string;
 }
 
@@ -52,6 +54,8 @@ interface TrabajadorData {
   horaFin?: string;
   diasTrabajo?: string[];
   horariosTrabajo?: HorariosTrabajo;
+  tiempoDescanso?: number;
+  limiteDiasReserva?: number;
   user_id: string;
 }
 
@@ -107,7 +111,7 @@ export default function Configuracion() {
         // Migrar horarios antiguos al nuevo formato si es necesario
         let horariosTrabajo: HorariosTrabajo = {};
         
-        if (t.horariosTrabajo) {
+        if (t.horariosTrabajo && Object.keys(t.horariosTrabajo).length > 0) {
           // Ya tiene el nuevo formato
           horariosTrabajo = t.horariosTrabajo;
         } else if (t.diasTrabajo && t.horaInicio && t.horaFin) {
@@ -136,6 +140,8 @@ export default function Configuracion() {
             : [],
           festivos: t.festivos || [],
           horariosTrabajo,
+          tiempoDescanso: t.tiempoDescanso || 0,
+          limiteDiasReserva: t.limiteDiasReserva || t.duracionCitaDefecto || 30,
           user_id: t.user_id
         };
       });
@@ -207,6 +213,8 @@ export default function Configuracion() {
         festivos: [],
         duracionCitaDefecto: 30,
         horariosTrabajo: horariosDefecto,
+        tiempoDescanso: 0,
+        limiteDiasReserva: 30,
         user_id: user.id
       };
 
@@ -227,6 +235,8 @@ export default function Configuracion() {
         servicios: [],
         festivos: data.festivos || [],
         horariosTrabajo: data.horariosTrabajo || horariosDefecto,
+        tiempoDescanso: data.tiempoDescanso || 0,
+        limiteDiasReserva: data.limiteDiasReserva || 30,
         user_id: data.user_id
       };
       
@@ -540,6 +550,35 @@ export default function Configuracion() {
     }
   };
 
+  // 🔥 NUEVA FUNCIÓN: Actualizar configuración avanzada
+  const actualizarConfiguracionAvanzada = async (trabajadorId: string, campo: 'tiempoDescanso' | 'limiteDiasReserva', valor: number) => {
+    if (!user) return;
+    
+    try {
+      const updateData = { [campo]: valor };
+      
+      const { error } = await supabase
+        .from('trabajadores')
+        .update(updateData)
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, [campo]: valor };
+        }
+        return t;
+      }));
+      
+      showMessage("Configuración actualizada");
+    } catch (error) {
+      console.error('Error actualizando configuración:', error);
+      showMessage("Error actualizando configuración");
+    }
+  };
+
   const formatearFecha = (fecha: string): string => {
     return new Date(fecha).toLocaleDateString('es-ES', {
       day: 'numeric',
@@ -717,7 +756,7 @@ export default function Configuracion() {
                           {trabajador.nombre}
                         </h3>
                         <p style={{ margin: '0.25rem 0 0 0', opacity: 0.9, fontSize: 'clamp(0.75rem, 2.5vw, 0.875rem)' }}>
-                          {trabajador.servicios.length} servicios • {obtenerResumenHorarios(trabajador.horariosTrabajo)}
+                          {trabajador.servicios.length} servicios • {obtenerResumenHorarios(trabajador.horariosTrabajo)} • {trabajador.tiempoDescanso}min descanso
                         </p>
                       </div>
                     </div>
@@ -962,7 +1001,7 @@ export default function Configuracion() {
                         <div style={{ background: '#f0f9ff', padding: '1rem', borderRadius: '0.75rem', border: '1px solid #bfdbfe' }}>
                           {diasSemana.map((dia) => (
                             <div key={dia.id} style={{ marginBottom: '1.5rem' }}>
-                              <div style={{ display: 'flex', items: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                                 <h5 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e40af', margin: 0 }}>
                                   {dia.nombre}
                                 </h5>
@@ -1053,6 +1092,78 @@ export default function Configuracion() {
                               </div>
                             </div>
                           ))}
+                        </div>
+                      </div>
+
+                      {/* 🔥 NUEVA SECCIÓN: Configuración Avanzada */}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                          <Settings size={20} style={{ color: '#f59e0b' }} />
+                          <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
+                            Configuración Avanzada
+                          </h4>
+                        </div>
+
+                        <div style={{ 
+                          background: '#fff7ed', 
+                          border: '1px solid #fed7aa', 
+                          borderRadius: '0.75rem', 
+                          padding: '1rem'
+                        }}>
+                          <div style={{ display: 'grid', gap: '1rem' }}>
+                            {/* Tiempo de Descanso */}
+                            <div>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
+                                <Coffee size={16} />
+                                Tiempo de descanso entre citas (minutos)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="60"
+                                step="5"
+                                value={trabajador.tiempoDescanso}
+                                onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'tiempoDescanso', parseInt(e.target.value) || 0)}
+                                style={{
+                                  padding: '0.5rem',
+                                  border: '1px solid #fed7aa',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '0.875rem',
+                                  width: '80px',
+                                  textAlign: 'center'
+                                }}
+                              />
+                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
+                                Tiempo libre automático entre citas consecutivas
+                              </p>
+                            </div>
+
+                            {/* Límite de Reserva */}
+                            <div>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: '600', color: '#ea580c', marginBottom: '0.5rem' }}>
+                                <Shield size={16} />
+                                Límite de reserva (días de antelación)
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="365"
+                                value={trabajador.limiteDiasReserva}
+                                onChange={(e) => actualizarConfiguracionAvanzada(trabajador.id, 'limiteDiasReserva', parseInt(e.target.value) || 30)}
+                                style={{
+                                  padding: '0.5rem',
+                                  border: '1px solid #fed7aa',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '0.875rem',
+                                  width: '80px',
+                                  textAlign: 'center'
+                                }}
+                              />
+                              <p style={{ color: '#9a3412', margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
+                                Los clientes podrán reservar hasta este número de días de antelación
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
