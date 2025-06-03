@@ -31,7 +31,7 @@ const generarHorasFormulario = () => {
   return horas;
 };
 
-export default function CargaTrabajoMejorada() {
+export default function CargaTrabajoCorregida() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [reservas, setReservas] = useState([]);
@@ -46,6 +46,8 @@ export default function CargaTrabajoMejorada() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [guardandoReserva, setGuardandoReserva] = useState(false);
+  
   const [modalFormData, setModalFormData] = useState({
     nombre: '',
     telefono: '',
@@ -80,7 +82,7 @@ export default function CargaTrabajoMejorada() {
     }));
   };
 
-  // Verificar autenticación y cargar datos
+  // Verificar autenticación y cargar datos SIN REDIRECCIONES AUTOMÁTICAS
   useEffect(() => {
     const checkAuthAndLoadData = async () => {
       try {
@@ -89,11 +91,13 @@ export default function CargaTrabajoMejorada() {
           setUser(currentUser);
           await cargarDatos(currentUser.id);
         } else {
+          // SOLO redirigir si realmente no hay usuario
           router.push('/login');
         }
       } catch (error) {
         console.error('Error de autenticación:', error);
-        router.push('/login');
+        // No redirigir automáticamente en caso de error
+        setError('Error de autenticación. Por favor, recarga la página.');
       }
     };
 
@@ -138,7 +142,7 @@ export default function CargaTrabajoMejorada() {
       if (errorServicios) throw errorServicios;
       setServicios(serviciosData || []);
 
-      // Cargar reservas
+      // Cargar reservas con manejo de errores mejorado
       await cargarReservas(userId);
 
     } catch (error) {
@@ -158,7 +162,12 @@ export default function CargaTrabajoMejorada() {
         .order('fecha', { ascending: true })
         .order('hora', { ascending: true });
 
-      if (errorReservas) throw errorReservas;
+      if (errorReservas) {
+        console.error('Error cargando reservas:', errorReservas);
+        // No lanzar error, solo mostrar mensaje
+        showMessage('Error cargando algunas reservas', 'error');
+        return;
+      }
       
       const reservasProcesadas = (reservasData || []).map((r) => ({
         id: r.id,
@@ -176,6 +185,7 @@ export default function CargaTrabajoMejorada() {
       setReservasFiltradas(reservasProcesadas);
     } catch (error) {
       console.error('Error cargando reservas:', error);
+      showMessage('Error cargando reservas', 'error');
     }
   };
 
@@ -459,12 +469,23 @@ export default function CargaTrabajoMejorada() {
   };
 
   const guardarReserva = async () => {
-    if (!user || !trabajadorActivo) return;
+    if (!user || !trabajadorActivo) {
+      showMessage('Error: Usuario o trabajador no válido', 'error');
+      return;
+    }
+
+    // Validar campos requeridos
+    if (!modalFormData.nombre.trim() || !modalFormData.telefono.trim() || !modalFormData.email.trim()) {
+      showMessage('Por favor, completa todos los campos requeridos', 'error');
+      return;
+    }
+
+    setGuardandoReserva(true);
 
     const cliente = {
-      nombre: modalFormData.nombre,
-      telefono: modalFormData.telefono,
-      email: modalFormData.email
+      nombre: modalFormData.nombre.trim(),
+      telefono: modalFormData.telefono.trim(),
+      email: modalFormData.email.trim()
     };
 
     const hora = modalFormData.hora;
@@ -486,24 +507,29 @@ export default function CargaTrabajoMejorada() {
         if (error) throw error;
         showMessage('Reserva actualizada exitosamente', 'success');
       } else {
-        // Crear nueva reserva
+        // Crear nueva reserva - ESTRUCTURA CORREGIDA
+        const nuevaReserva = {
+          trabajador: trabajadorActivo,
+          fecha: modalData?.fecha,
+          hora,
+          cliente,
+          observaciones,
+          estado: 'confirmada', // Asegurar que se incluya el estado
+          user_id: user.id
+        };
+
         const { error } = await supabase
           .from('reservas')
-          .insert([{
-            trabajador: trabajadorActivo,
-            fecha: modalData?.fecha,
-            hora,
-            cliente,
-            observaciones,
-            estado: 'confirmada',
-            user_id: user.id
-          }]);
+          .insert([nuevaReserva]);
 
         if (error) throw error;
         showMessage('Reserva creada exitosamente', 'success');
       }
 
+      // Recargar reservas
       await cargarReservas(user.id);
+      
+      // Cerrar modal y limpiar formulario
       setModalData(null);
       setModalFormData({
         nombre: '',
@@ -512,9 +538,12 @@ export default function CargaTrabajoMejorada() {
         hora: '',
         observaciones: ''
       });
+      
     } catch (error) {
       console.error('Error guardando reserva:', error);
-      showMessage('Error al guardar la reserva', 'error');
+      showMessage(`Error al guardar la reserva: ${error.message}`, 'error');
+    } finally {
+      setGuardandoReserva(false);
     }
   };
 
@@ -1061,24 +1090,37 @@ export default function CargaTrabajoMejorada() {
         </div>
       </div>
 
-      {/* Modal de Reserva */}
+      {/* Modal de Reserva - MEJORADO PARA MÓVIL */}
       {modalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full">
-                  <User className="w-5 h-5 text-white" />
+          {/* Contenedor principal responsive */}
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[95vh] flex flex-col">
+            {/* Header fijo */}
+            <div className="p-4 md:p-6 border-b border-gray-200 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full">
+                    <User className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-lg md:text-xl font-bold text-gray-800">
+                    {modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}
+                  </h2>
                 </div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  {modalData?.id ? 'Editar Reserva' : 'Nueva Reserva'}
-                </h2>
+                <button
+                  onClick={() => setModalData(null)}
+                  className="text-gray-400 hover:text-gray-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              
+            </div>
+            
+            {/* Contenido scrolleable */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nombre completo
+                    Nombre completo *
                   </label>
                   <input 
                     value={modalFormData.nombre}
@@ -1091,7 +1133,7 @@ export default function CargaTrabajoMejorada() {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Teléfono
+                    Teléfono *
                   </label>
                   <input 
                     value={modalFormData.telefono}
@@ -1104,7 +1146,7 @@ export default function CargaTrabajoMejorada() {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email
+                    Email *
                   </label>
                   <input 
                     type="email"
@@ -1118,7 +1160,7 @@ export default function CargaTrabajoMejorada() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Hora de la cita
+                    Hora de la cita *
                   </label>
                   <select 
                     value={modalFormData.hora}
@@ -1126,6 +1168,7 @@ export default function CargaTrabajoMejorada() {
                     required 
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   >
+                    <option value="">Selecciona una hora</option>
                     {horasFormulario.map((hora) => (
                       <option key={hora} value={hora}>{hora}</option>
                     ))}
@@ -1141,25 +1184,37 @@ export default function CargaTrabajoMejorada() {
                     onChange={(e) => handleModalInputChange('observaciones', e.target.value)}
                     placeholder="Observaciones adicionales..." 
                     rows={3}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
                   />
                 </div>
               </div>
-              
-              <div className="flex justify-end gap-3 mt-8">
+            </div>
+            
+            {/* Footer fijo */}
+            <div className="p-4 md:p-6 border-t border-gray-200 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button 
                   type="button" 
                   onClick={() => setModalData(null)} 
-                  className="px-6 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors"
+                  className="flex-1 px-6 py-3 text-gray-600 hover:text-gray-800 font-medium transition-colors border border-gray-300 rounded-lg hover:bg-gray-50"
+                  disabled={guardandoReserva}
                 >
                   Cancelar
                 </button>
                 <button 
                   type="button"
                   onClick={guardarReserva}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all shadow-lg hover:shadow-xl"
+                  disabled={guardandoReserva}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Guardar Reserva
+                  {guardandoReserva ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Guardando...
+                    </span>
+                  ) : (
+                    'Guardar Reserva'
+                  )}
                 </button>
               </div>
             </div>
@@ -1167,17 +1222,18 @@ export default function CargaTrabajoMejorada() {
         </div>
       )}
 
-      {/* Modal de Búsqueda de Disponibilidad */}
+      {/* Modal de Búsqueda de Disponibilidad - MEJORADO PARA MÓVIL */}
       {modalDisponibilidad && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 sm:p-4 z-50">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-2 rounded-full">
                     <CalendarSearch className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-xl font-bold text-gray-800">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-800">
                     Buscar Disponibilidad
                   </h2>
                 </div>
@@ -1188,10 +1244,13 @@ export default function CargaTrabajoMejorada() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              
+            </div>
+            
+            {/* Contenido scrolleable */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               {/* Formulario de búsqueda */}
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Desde fecha
@@ -1204,7 +1263,7 @@ export default function CargaTrabajoMejorada() {
                         fechaDesde: e.target.value
                       }))}
                       min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
                     />
                   </div>
                   
@@ -1218,7 +1277,7 @@ export default function CargaTrabajoMejorada() {
                         ...prev,
                         horaDesde: e.target.value
                       }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
                     >
                       {horasFormulario.map(hora => (
                         <option key={hora} value={hora}>{hora}</option>
@@ -1236,7 +1295,7 @@ export default function CargaTrabajoMejorada() {
                         ...prev,
                         servicio: e.target.value
                       }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
                     >
                       <option value="">Cualquier servicio</option>
                       {servicios.map(servicio => (
@@ -1257,7 +1316,7 @@ export default function CargaTrabajoMejorada() {
                         ...prev,
                         trabajador: e.target.value
                       }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
                     >
                       <option value="">Trabajador actual</option>
                       {trabajadores.map(trabajador => (
@@ -1269,7 +1328,7 @@ export default function CargaTrabajoMejorada() {
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Cantidad de resultados
@@ -1280,7 +1339,7 @@ export default function CargaTrabajoMejorada() {
                         ...prev,
                         cantidadResultados: parseInt(e.target.value)
                       }))}
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
                     >
                       <option value={5}>5 resultados</option>
                       <option value={10}>10 resultados</option>
@@ -1289,11 +1348,11 @@ export default function CargaTrabajoMejorada() {
                     </select>
                   </div>
                   
-                  <div className="flex-1 flex justify-end">
+                  <div className="w-full sm:w-auto">
                     <button
                       onClick={buscarProximasDisponibilidades}
                       disabled={buscandoDisponibilidad}
-                      className="flex items-center gap-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                     >
                       {buscandoDisponibilidad ? (
                         <>
@@ -1318,34 +1377,38 @@ export default function CargaTrabajoMejorada() {
                     Próximas disponibilidades ({resultadosDisponibilidad.length} encontradas)
                   </h3>
                   
-                  <div className="grid gap-3 max-h-96 overflow-y-auto">
+                  <div className="grid gap-3">
                     {resultadosDisponibilidad.map((resultado, index) => (
                       <div key={index} className="bg-green-50 border border-green-200 rounded-lg p-4 hover:bg-green-100 transition-colors">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <Calendar className="w-5 h-5 text-green-600" />
-                              <span className="font-semibold text-gray-800">
-                                {resultado.fechaFormateada}
-                              </span>
-                              <span className="text-green-700 font-medium">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-5 h-5 text-green-600 flex-shrink-0" />
+                                <span className="font-semibold text-gray-800 text-sm sm:text-base">
+                                  {resultado.fechaFormateada}
+                                </span>
+                              </div>
+                              <span className="text-green-700 font-medium text-lg">
                                 {resultado.hora}
                               </span>
                             </div>
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <User className="w-4 h-4" />
-                              <span>{resultado.trabajador.nombre}</span>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                              <div className="flex items-center gap-1">
+                                <User className="w-4 h-4" />
+                                <span>{resultado.trabajador.nombre}</span>
+                              </div>
                               {resultado.duracion !== 30 && (
-                                <>
-                                  <Clock className="w-4 h-4 ml-2" />
+                                <div className="flex items-center gap-1">
+                                  <Clock className="w-4 h-4" />
                                   <span>{resultado.duracion} min</span>
-                                </>
+                                </div>
                               )}
                             </div>
                           </div>
                           <button
                             onClick={() => reservarDesdeDisponibilidad(resultado)}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium"
+                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium text-sm"
                           >
                             <Plus className="w-4 h-4" />
                             Reservar
