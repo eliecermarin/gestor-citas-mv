@@ -1,22 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
-import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X, AlertCircle, CheckCircle, Filter, CalendarSearch, Zap } from "lucide-react";
+import { Calendar, Clock, User, Phone, Mail, Edit2, Trash2, Plus, ChevronLeft, ChevronRight, Search, X, AlertCircle, CheckCircle, Filter, CalendarSearch, Zap, Ban } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useRouter } from "next/router";
 
 const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-
-// Generar horas para el calendario principal (intervalos de 30 minutos)
-const generarHorasCalendario = () => {
-  const horas = [];
-  for (let hour = 8; hour <= 21; hour++) {
-    for (let minute = 0; minute < 60; minute += 30) {
-      if (hour === 21 && minute > 30) break;
-      const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-      horas.push(timeString);
-    }
-  }
-  return horas;
-};
 
 // Generar horas para formularios (intervalos de 15 minutos)
 const generarHorasFormulario = () => {
@@ -36,10 +23,12 @@ export default function CargaTrabajoCorregida() {
   const [user, setUser] = useState(null);
   const [reservas, setReservas] = useState([]);
   const [reservasFiltradas, setReservasFiltradas] = useState([]);
+  const [bloqueos, setBloqueos] = useState([]); // Nuevos bloqueos manuales
   const [trabajadores, setTrabajadores] = useState([]);
   const [servicios, setServicios] = useState([]);
   const [trabajadorActivo, setTrabajadorActivo] = useState(null);
   const [modalData, setModalData] = useState(null);
+  const [modalBloqueo, setModalBloqueo] = useState(false);
   const [fechaActual, setFechaActual] = useState(new Date());
   const [busqueda, setBusqueda] = useState("");
   const [modalDisponibilidad, setModalDisponibilidad] = useState(false);
@@ -55,6 +44,13 @@ export default function CargaTrabajoCorregida() {
     hora: '',
     observaciones: ''
   });
+
+  const [bloqueoFormData, setBloqueoFormData] = useState({
+    fecha: '',
+    horaInicio: '',
+    horaFin: '',
+    motivo: ''
+  });
   
   // Estados para búsqueda de disponibilidad
   const [busquedaDisponibilidad, setBusquedaDisponibilidad] = useState({
@@ -67,7 +63,6 @@ export default function CargaTrabajoCorregida() {
   const [resultadosDisponibilidad, setResultadosDisponibilidad] = useState([]);
   const [buscandoDisponibilidad, setBuscandoDisponibilidad] = useState(false);
 
-  const horasCalendario = generarHorasCalendario();
   const horasFormulario = generarHorasFormulario();
 
   const showMessage = (msg, type = "success") => {
@@ -82,7 +77,7 @@ export default function CargaTrabajoCorregida() {
     }));
   };
 
-  // Verificar autenticación y cargar datos SIN REDIRECCIONES AUTOMÁTICAS
+  // Verificar autenticación SIN REDIRECCIONES AUTOMÁTICAS
   useEffect(() => {
     const checkAuthAndLoadData = async () => {
       try {
@@ -91,25 +86,24 @@ export default function CargaTrabajoCorregida() {
           setUser(currentUser);
           await cargarDatos(currentUser.id);
         } else {
-          // SOLO redirigir si realmente no hay usuario
-          router.push('/login');
+          // Solo mostrar error, no redirigir automáticamente
+          setError('No hay usuario autenticado');
         }
       } catch (error) {
         console.error('Error de autenticación:', error);
-        // No redirigir automáticamente en caso de error
-        setError('Error de autenticación. Por favor, recarga la página.');
+        setError('Error de autenticación');
       }
     };
 
     checkAuthAndLoadData();
-  }, [router]);
+  }, []); // Sin dependencias que causen re-renders
 
   const cargarDatos = async (userId) => {
     setIsLoading(true);
     setError("");
     
     try {
-      // Cargar trabajadores con nueva estructura
+      // Cargar trabajadores
       const { data: trabajadoresData, error: errorTrabajadores } = await supabase
         .from('trabajadores')
         .select('*')
@@ -142,8 +136,11 @@ export default function CargaTrabajoCorregida() {
       if (errorServicios) throw errorServicios;
       setServicios(serviciosData || []);
 
-      // Cargar reservas con manejo de errores mejorado
+      // Cargar reservas
       await cargarReservas(userId);
+
+      // Cargar bloqueos manuales
+      await cargarBloqueos(userId);
 
     } catch (error) {
       console.error('Error cargando datos:', error);
@@ -164,7 +161,6 @@ export default function CargaTrabajoCorregida() {
 
       if (errorReservas) {
         console.error('Error cargando reservas:', errorReservas);
-        // No lanzar error, solo mostrar mensaje
         showMessage('Error cargando algunas reservas', 'error');
         return;
       }
@@ -189,12 +185,54 @@ export default function CargaTrabajoCorregida() {
     }
   };
 
-  // Función para verificar si un trabajador está disponible en una fecha/hora específica
+  const cargarBloqueos = async (userId) => {
+    try {
+      // Buscar en una tabla de bloqueos (si existe) o crear estructura temporal
+      const { data: bloqueosData, error: errorBloqueos } = await supabase
+        .from('bloqueos')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (errorBloqueos && errorBloqueos.code !== 'PGRST116') {
+        console.error('Error cargando bloqueos:', errorBloqueos);
+        // Si no existe la tabla, crear estructura temporal en memoria
+        setBloqueos([]);
+        return;
+      }
+      
+      setBloqueos(bloqueosData || []);
+    } catch (error) {
+      console.error('Error cargando bloqueos:', error);
+      setBloqueos([]);
+    }
+  };
+
+  // Función mejorada para verificar disponibilidad con duración exacta
   const estaDisponible = (trabajadorId, fecha, horaInicio, duracionMinutos = 30) => {
     const trabajador = trabajadores.find(t => t.id === trabajadorId);
     if (!trabajador) return false;
 
     const fechaObj = new Date(fecha);
+    const hoy = new Date();
+    const esHoy = fechaObj.toDateString() === hoy.toDateString();
+
+    // Si es hoy, verificar que la hora no haya pasado
+    if (esHoy) {
+      const [horaIni, minIni] = horaInicio.split(':').map(Number);
+      const horaActual = hoy.getHours();
+      const minutoActual = hoy.getMinutes();
+      
+      if (horaIni < horaActual || (horaIni === horaActual && minIni <= minutoActual)) {
+        return false; // La hora ya pasó
+      }
+    }
+
+    // Verificar límite de días de reserva
+    const diasDiferencia = Math.ceil((fechaObj - hoy) / (1000 * 60 * 60 * 24));
+    if (diasDiferencia > trabajador.limiteDiasReserva) {
+      return false; // Excede el límite de días
+    }
+
     const diaSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][fechaObj.getDay()];
     
     // Verificar si es día festivo
@@ -207,7 +245,7 @@ export default function CargaTrabajoCorregida() {
     // Convertir hora inicio a minutos
     const [horaIni, minIni] = horaInicio.split(':').map(Number);
     const minutosInicio = horaIni * 60 + minIni;
-    const minutosFin = minutosInicio + duracionMinutos + trabajador.tiempoDescanso;
+    const minutosFin = minutosInicio + duracionMinutos;
     
     // Verificar si está dentro de alguna franja horaria
     let dentroFranja = false;
@@ -225,7 +263,7 @@ export default function CargaTrabajoCorregida() {
     
     if (!dentroFranja) return false;
     
-    // Verificar que no haya conflicto con reservas existentes
+    // Verificar conflictos con reservas existentes
     const reservasConflicto = reservas.filter(r => 
       r.trabajador === trabajadorId && 
       r.fecha === fecha && 
@@ -236,13 +274,29 @@ export default function CargaTrabajoCorregida() {
       const [horaRes, minRes] = reserva.hora.split(':').map(Number);
       const minutosReserva = horaRes * 60 + minRes;
       
-      // Obtener duración del servicio de la reserva
       const servicioReserva = servicios.find(s => s.id === reserva.servicio_id);
       const duracionReserva = servicioReserva ? servicioReserva.duracion : 30;
       const minutosFinReserva = minutosReserva + duracionReserva + trabajador.tiempoDescanso;
       
-      // Verificar solapamiento
-      if (!(minutosFin <= minutosReserva || minutosInicio >= minutosFinReserva)) {
+      // Verificar solapamiento exacto
+      if (!(minutosFin + trabajador.tiempoDescanso <= minutosReserva || minutosInicio >= minutosFinReserva)) {
+        return false;
+      }
+    }
+    
+    // Verificar conflictos con bloqueos manuales
+    const bloqueosConflicto = bloqueos.filter(b => 
+      b.trabajador === trabajadorId && 
+      b.fecha === fecha
+    );
+    
+    for (const bloqueo of bloqueosConflicto) {
+      const [horaBloqueoIni, minBloqueoIni] = bloqueo.horaInicio.split(':').map(Number);
+      const [horaBloqueoFin, minBloqueoFin] = bloqueo.horaFin.split(':').map(Number);
+      const minutosBloqueoIni = horaBloqueoIni * 60 + minBloqueoIni;
+      const minutosBloqueoFin = horaBloqueoFin * 60 + minBloqueoFin;
+      
+      if (!(minutosFin <= minutosBloqueoIni || minutosInicio >= minutosBloqueoFin)) {
         return false;
       }
     }
@@ -250,7 +304,35 @@ export default function CargaTrabajoCorregida() {
     return true;
   };
 
-  // Función para buscar próximas disponibilidades
+  // Generar horas del calendario basadas en configuración del trabajador
+  const generarHorasCalendario = (trabajadorId) => {
+    const trabajador = trabajadores.find(t => t.id === trabajadorId);
+    if (!trabajador) return [];
+
+    const horasSet = new Set();
+    
+    // Para cada día de la semana, obtener las franjas horarias
+    Object.values(trabajador.horariosTrabajo || {}).forEach(horarioDia => {
+      if (horarioDia.activo && horarioDia.franjas) {
+        horarioDia.franjas.forEach(franja => {
+          const [horaIni, minIni] = franja.inicio.split(':').map(Number);
+          const [horaFin, minFin] = franja.fin.split(':').map(Number);
+          
+          // Generar slots cada 30 minutos dentro de la franja
+          for (let minutos = horaIni * 60 + minIni; minutos < horaFin * 60 + minFin; minutos += 30) {
+            const hora = Math.floor(minutos / 60);
+            const min = minutos % 60;
+            const timeString = `${hora.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+            horasSet.add(timeString);
+          }
+        });
+      }
+    });
+    
+    return Array.from(horasSet).sort();
+  };
+
+  // Función mejorada para buscar disponibilidades exactas
   const buscarProximasDisponibilidades = async () => {
     setBuscandoDisponibilidad(true);
     
@@ -272,8 +354,7 @@ export default function CargaTrabajoCorregida() {
         if (servicio) duracionServicio = servicio.duracion;
       }
       
-      // Buscar en los próximos días (hasta el límite del trabajador)
-      const maxDias = Math.min(trabajador.limiteDiasReserva, 60);
+      const maxDias = trabajador.limiteDiasReserva;
       
       for (let dia = 0; dia < maxDias && resultados.length < busquedaDisponibilidad.cantidadResultados; dia++) {
         const fecha = new Date(fechaInicio);
@@ -290,8 +371,8 @@ export default function CargaTrabajoCorregida() {
           const [horaIni, minIni] = franja.inicio.split(':').map(Number);
           const [horaFin, minFin] = franja.fin.split(':').map(Number);
           
-          // Generar slots cada 15 minutos
-          for (let minutos = horaIni * 60 + minIni; minutos <= (horaFin * 60 + minFin) - duracionServicio; minutos += 15) {
+          // Buscar huecos exactos con la duración del servicio
+          for (let minutos = horaIni * 60 + minIni; minutos <= (horaFin * 60 + minFin) - duracionServicio; minutos += 5) {
             const hora = Math.floor(minutos / 60);
             const min = minutos % 60;
             const horaStr = `${hora.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
@@ -377,7 +458,7 @@ export default function CargaTrabajoCorregida() {
       const fechaReserva = fecha.toISOString().split('T')[0];
       const fechaDiaStr = fechaDia.toISOString().split('T')[0];
       
-      // Comparar intervalos de 30 minutos para mejor agrupación
+      // Comparar intervalos de 30 minutos
       const [horaRes, minRes] = r.hora.split(':').map(Number);
       const [horaSlot, minSlot] = hora.split(':').map(Number);
       const minutosReserva = horaRes * 60 + minRes;
@@ -388,6 +469,28 @@ export default function CargaTrabajoCorregida() {
              minutosReserva < minutosSlot + 30 &&
              r.trabajador === trabajadorActivo &&
              r.estado !== 'cancelada';
+    });
+  };
+
+  const getBloqueosPorDiaHora = (dia, hora) => {
+    const inicioSemana = getInicioSemana(fechaActual);
+    const diaIndice = diasSemana.indexOf(dia);
+    const fechaDia = new Date(inicioSemana);
+    fechaDia.setDate(inicioSemana.getDate() + diaIndice);
+    const fechaStr = fechaDia.toISOString().split('T')[0];
+
+    return bloqueos.filter(b => {
+      if (b.trabajador !== trabajadorActivo || b.fecha !== fechaStr) return false;
+      
+      const [horaBloqueoIni, minBloqueoIni] = b.horaInicio.split(':').map(Number);
+      const [horaBloqueoFin, minBloqueoFin] = b.horaFin.split(':').map(Number);
+      const [horaSlot, minSlot] = hora.split(':').map(Number);
+      
+      const minutosBloqueoIni = horaBloqueoIni * 60 + minBloqueoIni;
+      const minutosBloqueoFin = horaBloqueoFin * 60 + minBloqueoFin;
+      const minutosSlot = horaSlot * 60 + minSlot;
+      
+      return minutosSlot >= minutosBloqueoIni && minutosSlot < minutosBloqueoFin;
     });
   };
 
@@ -468,15 +571,31 @@ export default function CargaTrabajoCorregida() {
     }
   };
 
+  const abrirModalBloqueo = (dia, hora) => {
+    const inicioSemana = getInicioSemana(fechaActual);
+    const diaIndice = diasSemana.indexOf(dia);
+    const fecha = new Date(inicioSemana);
+    fecha.setDate(inicioSemana.getDate() + diaIndice);
+    const iso = fecha.toISOString().split("T")[0];
+    
+    setBloqueoFormData({
+      fecha: iso,
+      horaInicio: hora,
+      horaFin: hora,
+      motivo: ''
+    });
+    setModalBloqueo(true);
+  };
+
   const guardarReserva = async () => {
     if (!user || !trabajadorActivo) {
       showMessage('Error: Usuario o trabajador no válido', 'error');
       return;
     }
 
-    // Validar campos requeridos
-    if (!modalFormData.nombre.trim() || !modalFormData.telefono.trim() || !modalFormData.email.trim()) {
-      showMessage('Por favor, completa todos los campos requeridos', 'error');
+    // SIN VALIDACIONES OBLIGATORIAS - Solo nombre mínimo
+    if (!modalFormData.nombre.trim()) {
+      showMessage('El nombre es requerido', 'error');
       return;
     }
 
@@ -507,14 +626,14 @@ export default function CargaTrabajoCorregida() {
         if (error) throw error;
         showMessage('Reserva actualizada exitosamente', 'success');
       } else {
-        // Crear nueva reserva - ESTRUCTURA CORREGIDA
+        // Crear nueva reserva
         const nuevaReserva = {
           trabajador: trabajadorActivo,
           fecha: modalData?.fecha,
           hora,
           cliente,
           observaciones,
-          estado: 'confirmada', // Asegurar que se incluya el estado
+          estado: 'confirmada',
           user_id: user.id
         };
 
@@ -526,10 +645,7 @@ export default function CargaTrabajoCorregida() {
         showMessage('Reserva creada exitosamente', 'success');
       }
 
-      // Recargar reservas
       await cargarReservas(user.id);
-      
-      // Cerrar modal y limpiar formulario
       setModalData(null);
       setModalFormData({
         nombre: '',
@@ -544,6 +660,50 @@ export default function CargaTrabajoCorregida() {
       showMessage(`Error al guardar la reserva: ${error.message}`, 'error');
     } finally {
       setGuardandoReserva(false);
+    }
+  };
+
+  const guardarBloqueo = async () => {
+    if (!user || !trabajadorActivo) {
+      showMessage('Error: Usuario o trabajador no válido', 'error');
+      return;
+    }
+
+    try {
+      const nuevoBloqueo = {
+        trabajador: trabajadorActivo,
+        fecha: bloqueoFormData.fecha,
+        horaInicio: bloqueoFormData.horaInicio,
+        horaFin: bloqueoFormData.horaFin,
+        motivo: bloqueoFormData.motivo || 'Bloqueo manual',
+        user_id: user.id
+      };
+
+      // Intentar guardar en tabla bloqueos (si existe)
+      const { error } = await supabase
+        .from('bloqueos')
+        .insert([nuevoBloqueo]);
+
+      if (error) {
+        // Si no existe la tabla, guardar temporalmente en memoria
+        setBloqueos([...bloqueos, { ...nuevoBloqueo, id: Date.now() }]);
+        showMessage('Bloqueo guardado temporalmente (crear tabla bloqueos en Supabase)', 'success');
+      } else {
+        await cargarBloqueos(user.id);
+        showMessage('Bloqueo guardado exitosamente', 'success');
+      }
+
+      setModalBloqueo(false);
+      setBloqueoFormData({
+        fecha: '',
+        horaInicio: '',
+        horaFin: '',
+        motivo: ''
+      });
+      
+    } catch (error) {
+      console.error('Error guardando bloqueo:', error);
+      showMessage(`Error al guardar el bloqueo: ${error.message}`, 'error');
     }
   };
 
@@ -652,6 +812,8 @@ export default function CargaTrabajoCorregida() {
       </div>
     );
   }
+
+  const horasCalendario = generarHorasCalendario(trabajadorActivo);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
@@ -839,7 +1001,9 @@ export default function CargaTrabajoCorregida() {
                   </div>
                   {diasSemana.map((dia) => {
                     const reservasEnSlot = getReservasPorDiaHora(dia, hora);
+                    const bloqueosEnSlot = getBloqueosPorDiaHora(dia, hora);
                     const noDisponible = esDiaNoDisponible(dia);
+                    const hayBloqueo = bloqueosEnSlot.length > 0;
                     
                     return (
                       <div
@@ -847,17 +1011,59 @@ export default function CargaTrabajoCorregida() {
                         className={`border-t border-l border-gray-200 p-2 min-h-16 cursor-pointer transition-colors group relative overflow-hidden ${
                           noDisponible 
                             ? 'bg-red-50 hover:bg-red-100' 
-                            : 'bg-white hover:bg-blue-25'
+                            : hayBloqueo
+                              ? 'bg-orange-50 hover:bg-orange-100'
+                              : 'bg-white hover:bg-blue-25'
                         }`}
-                        onClick={() => !noDisponible && abrirModal(dia, hora)}
+                        onClick={() => !noDisponible && !hayBloqueo && abrirModal(dia, hora)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          if (!noDisponible) abrirModalBloqueo(dia, hora);
+                        }}
                       >
                         {/* Add button on hover */}
-                        {!noDisponible && (
+                        {!noDisponible && !hayBloqueo && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-blue-50">
                             <Plus className="w-6 h-6 text-blue-400" />
                           </div>
                         )}
+
+                        {/* Block button on right click */}
+                        {!noDisponible && (
+                          <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                abrirModalBloqueo(dia, hora);
+                              }}
+                              className="p-1 rounded bg-orange-100 text-orange-600 hover:bg-orange-200"
+                              title="Bloquear horario (click derecho)"
+                            >
+                              <Ban className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                         
+                        {/* Bloqueos */}
+                        {bloqueosEnSlot.map((bloqueo) => (
+                          <div key={bloqueo.id} className="bg-orange-200 border border-orange-300 rounded p-2 mb-1">
+                            <div className="flex items-center gap-1">
+                              <Ban className="w-3 h-3 text-orange-600" />
+                              <span className="text-xs font-medium text-orange-800">
+                                Bloqueado
+                              </span>
+                            </div>
+                            <div className="text-xs text-orange-700">
+                              {bloqueo.horaInicio} - {bloqueo.horaFin}
+                            </div>
+                            {bloqueo.motivo && (
+                              <div className="text-xs text-orange-600 truncate">
+                                {bloqueo.motivo}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
                         {/* Existing reservations */}
                         <div className="relative z-10 space-y-1">
                           {reservasEnSlot.map((r) => {
@@ -884,10 +1090,12 @@ export default function CargaTrabajoCorregida() {
                                       </p>
                                     </div>
                                     <div className="space-y-0.5">
-                                      <div className="flex items-center gap-1 text-xs text-gray-600">
-                                        <Phone className="w-2.5 h-2.5 flex-shrink-0" />
-                                        <span className="truncate" title={r.cliente?.telefono}>{r.cliente?.telefono}</span>
-                                      </div>
+                                      {r.cliente?.telefono && (
+                                        <div className="flex items-center gap-1 text-xs text-gray-600">
+                                          <Phone className="w-2.5 h-2.5 flex-shrink-0" />
+                                          <span className="truncate" title={r.cliente?.telefono}>{r.cliente?.telefono}</span>
+                                        </div>
+                                      )}
                                       <div className={`flex items-center gap-1 text-xs font-medium ${esResaltada ? 'text-yellow-700' : 'text-blue-700'}`}>
                                         <Clock className="w-2.5 h-2.5 flex-shrink-0" />
                                         <span>{r.hora}</span>
@@ -927,7 +1135,7 @@ export default function CargaTrabajoCorregida() {
                         </div>
                         
                         {/* Día no disponible indicator */}
-                        {noDisponible && reservasEnSlot.length === 0 && (
+                        {noDisponible && reservasEnSlot.length === 0 && bloqueosEnSlot.length === 0 && (
                           <div className="absolute inset-0 flex items-center justify-center">
                             <div className="text-red-400 text-xs font-medium">No disponible</div>
                           </div>
@@ -1028,19 +1236,23 @@ export default function CargaTrabajoCorregida() {
                                   <p className="font-semibold text-gray-800 text-lg">{r.cliente?.nombre}</p>
                                 </div>
                                 
-                                <div className="flex items-center gap-3">
-                                  <Phone className="w-4 h-4 text-gray-500" />
-                                  <a href={`tel:${r.cliente?.telefono}`} className="text-gray-700 hover:text-blue-600 transition-colors">
-                                    {r.cliente?.telefono}
-                                  </a>
-                                </div>
+                                {r.cliente?.telefono && (
+                                  <div className="flex items-center gap-3">
+                                    <Phone className="w-4 h-4 text-gray-500" />
+                                    <a href={`tel:${r.cliente?.telefono}`} className="text-gray-700 hover:text-blue-600 transition-colors">
+                                      {r.cliente?.telefono}
+                                    </a>
+                                  </div>
+                                )}
                                 
-                                <div className="flex items-center gap-3">
-                                  <Mail className="w-4 h-4 text-gray-500" />
-                                  <a href={`mailto:${r.cliente?.email}`} className="text-gray-700 hover:text-blue-600 transition-colors text-sm">
-                                    {r.cliente?.email}
-                                  </a>
-                                </div>
+                                {r.cliente?.email && (
+                                  <div className="flex items-center gap-3">
+                                    <Mail className="w-4 h-4 text-gray-500" />
+                                    <a href={`mailto:${r.cliente?.email}`} className="text-gray-700 hover:text-blue-600 transition-colors text-sm">
+                                      {r.cliente?.email}
+                                    </a>
+                                  </div>
+                                )}
 
                                 {servicio && (
                                   <div className="flex items-center gap-3">
@@ -1090,12 +1302,10 @@ export default function CargaTrabajoCorregida() {
         </div>
       </div>
 
-      {/* Modal de Reserva - MEJORADO PARA MÓVIL */}
+      {/* Modal de Reserva - SIN VALIDACIONES OBLIGATORIAS */}
       {modalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          {/* Contenedor principal responsive */}
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[95vh] flex flex-col">
-            {/* Header fijo */}
             <div className="p-4 md:p-6 border-b border-gray-200 flex-shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1115,57 +1325,52 @@ export default function CargaTrabajoCorregida() {
               </div>
             </div>
             
-            {/* Contenido scrolleable */}
             <div className="flex-1 overflow-y-auto p-4 md:p-6">
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nombre completo *
+                    Nombre *
                   </label>
                   <input 
                     value={modalFormData.nombre}
                     onChange={(e) => handleModalInputChange('nombre', e.target.value)}
-                    placeholder="Ingresa el nombre del cliente" 
-                    required 
+                    placeholder="Nombre del cliente" 
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Teléfono *
+                    Teléfono (opcional)
                   </label>
                   <input 
                     value={modalFormData.telefono}
                     onChange={(e) => handleModalInputChange('telefono', e.target.value)}
                     placeholder="Número de teléfono" 
-                    required 
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email *
+                    Email (opcional)
                   </label>
                   <input 
                     type="email"
                     value={modalFormData.email}
                     onChange={(e) => handleModalInputChange('email', e.target.value)}
                     placeholder="Correo electrónico" 
-                    required 
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Hora de la cita *
+                    Hora de la cita
                   </label>
                   <select 
                     value={modalFormData.hora}
                     onChange={(e) => handleModalInputChange('hora', e.target.value)}
-                    required 
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   >
                     <option value="">Selecciona una hora</option>
@@ -1190,7 +1395,6 @@ export default function CargaTrabajoCorregida() {
               </div>
             </div>
             
-            {/* Footer fijo */}
             <div className="p-4 md:p-6 border-t border-gray-200 flex-shrink-0">
               <div className="flex flex-col sm:flex-row gap-3">
                 <button 
@@ -1222,11 +1426,103 @@ export default function CargaTrabajoCorregida() {
         </div>
       )}
 
-      {/* Modal de Búsqueda de Disponibilidad - MEJORADO PARA MÓVIL */}
+      {/* Modal de Bloqueo */}
+      {modalBloqueo && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-r from-orange-500 to-red-500 p-2 rounded-full">
+                  <Ban className="w-5 h-5 text-white" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-800">
+                  Bloquear Horario
+                </h2>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Fecha
+                  </label>
+                  <input 
+                    type="date"
+                    value={bloqueoFormData.fecha}
+                    onChange={(e) => setBloqueoFormData(prev => ({ ...prev, fecha: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Hora inicio
+                    </label>
+                    <select 
+                      value={bloqueoFormData.horaInicio}
+                      onChange={(e) => setBloqueoFormData(prev => ({ ...prev, horaInicio: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                    >
+                      {horasFormulario.map((hora) => (
+                        <option key={hora} value={hora}>{hora}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Hora fin
+                    </label>
+                    <select 
+                      value={bloqueoFormData.horaFin}
+                      onChange={(e) => setBloqueoFormData(prev => ({ ...prev, horaFin: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                    >
+                      {horasFormulario.map((hora) => (
+                        <option key={hora} value={hora}>{hora}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Motivo (opcional)
+                  </label>
+                  <input 
+                    value={bloqueoFormData.motivo}
+                    onChange={(e) => setBloqueoFormData(prev => ({ ...prev, motivo: e.target.value }))}
+                    placeholder="Motivo del bloqueo"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-3 mt-8">
+                <button 
+                  type="button" 
+                  onClick={() => setModalBloqueo(false)} 
+                  className="px-6 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  onClick={guardarBloqueo}
+                  className="px-6 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white font-medium rounded-lg hover:from-orange-600 hover:to-red-600 transition-all shadow-lg hover:shadow-xl"
+                >
+                  Bloquear Horario
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Búsqueda de Disponibilidad - MEJORADO */}
       {modalDisponibilidad && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 sm:p-4 z-50">
           <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col">
-            {/* Header */}
             <div className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1246,9 +1542,7 @@ export default function CargaTrabajoCorregida() {
               </div>
             </div>
             
-            {/* Contenido scrolleable */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-              {/* Formulario de búsqueda */}
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                   <div>
@@ -1370,7 +1664,6 @@ export default function CargaTrabajoCorregida() {
                 </div>
               </div>
 
-              {/* Resultados */}
               {resultadosDisponibilidad.length > 0 && (
                 <div>
                   <h3 className="font-semibold text-gray-800 mb-4">
