@@ -3,9 +3,7 @@ import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../supabaseClient'
-// 🔥 LÍNEA CRÍTICA - IMPORTAR ESTILOS
 import '../styles/globals.css'
-
 
 interface User {
   id: string;
@@ -18,60 +16,75 @@ export default function App({ Component, pageProps }: AppProps) {
   const [user, setUser] = useState<User | null>(null)
 
   useEffect(() => {
-    // Verificar sesión inicial
+    // 🔧 FUNCIÓN SIMPLIFICADA: Solo verificar sesión, NO hacer consultas adicionales
     const getInitialSession = async () => {
       try {
-        console.log('🔍 DEBUG: Iniciando verificación de sesión...');
+        console.log('🔍 Verificando sesión inicial...');
         
         const { data: { session }, error } = await supabase.auth.getSession()
         
-        console.log('🔍 DEBUG: Respuesta de getSession:', { session: !!session, error });
+        if (error) {
+          console.error('❌ Error obteniendo sesión:', error);
+          setUser(null);
+        } else {
+          console.log('✅ Sesión obtenida:', !!session);
+          setUser(session?.user ?? null);
+        }
         
-        setUser(session?.user ?? null)
-        setLoading(false)
-        
-        console.log('✅ DEBUG: Sesión verificada, loading = false');
+        setLoading(false);
+        console.log('✅ Verificación inicial completada');
       } catch (error) {
-        console.error('💥 DEBUG: Error capturado:', error)
-        setLoading(false)
+        console.error('❌ Error en verificación inicial:', error);
+        setUser(null);
+        setLoading(false);
       }
     }
 
-    // Escuchar cambios de autenticación (SIMPLIFICADO)
+    // 🔧 LISTENER SIMPLIFICADO: Sin consultas a base de datos ni redirecciones automáticas
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('🔍 DEBUG: Auth state change:', event, !!session);
-        setUser(session?.user ?? null)
+        console.log('🔄 Auth state change:', event, !!session);
         
-        // REDIRIGIR SIMPLE - SIN CONSULTAS A LA BASE DE DATOS
-        if (event === 'SIGNED_IN') {
-          // Siempre ir a configuración primero
-          router.push('/configuracion')
-        } else if (event === 'SIGNED_OUT') {
-          // Usuario cerró sesión
-          router.push('/login')
+        // ✅ SOLO actualizar el usuario, SIN redirecciones automáticas
+        setUser(session?.user ?? null);
+        
+        // ✅ SOLO redirigir en casos MUY específicos
+        if (event === 'SIGNED_OUT') {
+          // Usuario cerró sesión manualmente
+          console.log('🚪 Usuario cerró sesión, redirigiendo a login');
+          router.push('/login');
         }
+        // ❌ REMOVIDO: No más redirecciones automáticas en SIGNED_IN
       }
     )
 
     getInitialSession()
 
-    return () => subscription.unsubscribe()
+    return () => {
+      console.log('🧹 Limpiando subscription');
+      subscription.unsubscribe();
+    }
   }, [router])
 
-  // Redirigir a login si no está autenticado (excepto en página de login)
+  // 🔧 REDIRECCIÓN SIMPLIFICADA: Solo para casos específicos
   useEffect(() => {
-    if (!loading && !user && router.pathname !== '/login') {
-      console.log('🔍 DEBUG: Redirigiendo a login');
-      router.push('/login')
+    // ✅ Solo redirigir si NO está logueado Y está en página protegida
+    if (!loading && !user) {
+      const paginasPublicas = ['/login'];
+      const esPagenaPublica = paginasPublicas.includes(router.pathname);
+      
+      if (!esPagenaPublica) {
+        console.log('🔒 Redirigiendo a login desde página protegida:', router.pathname);
+        router.push('/login');
+      }
     }
-  }, [user, loading, router])
+  }, [user, loading, router.pathname, router])
 
   // Páginas que no necesitan layout
   const noLayoutPages = ['/login']
   const showLayout = !noLayoutPages.includes(router.pathname)
 
-  // Mostrar loading mientras verifica autenticación
+  // ✅ Loading mejorado
   if (loading) {
     return (
       <>
