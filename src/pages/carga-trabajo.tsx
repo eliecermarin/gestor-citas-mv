@@ -18,12 +18,32 @@ const generarHorasFormulario = () => {
   return horas;
 };
 
+// ✅ NUEVA FUNCIÓN: Verificar si una fecha/hora ya pasó
+const esFechaHoraPasada = (fecha, hora = null) => {
+  const ahora = new Date();
+  const fechaObj = new Date(fecha);
+  
+  // Si solo verificamos fecha
+  if (!hora) {
+    const fechaSoloFecha = new Date(fechaObj.getFullYear(), fechaObj.getMonth(), fechaObj.getDate());
+    const hoySoloFecha = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+    return fechaSoloFecha < hoySoloFecha;
+  }
+  
+  // Si verificamos fecha y hora
+  const [horaNum, minNum] = hora.split(':').map(Number);
+  const fechaHoraObj = new Date(fechaObj);
+  fechaHoraObj.setHours(horaNum, minNum, 0, 0);
+  
+  return fechaHoraObj <= ahora;
+};
+
 export default function CargaTrabajoCorregida() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [reservas, setReservas] = useState([]);
   const [reservasFiltradas, setReservasFiltradas] = useState([]);
-  const [bloqueos, setBloqueos] = useState([]); // Nuevos bloqueos manuales
+  const [bloqueos, setBloqueos] = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [servicios, setServicios] = useState([]);
   const [trabajadorActivo, setTrabajadorActivo] = useState(null);
@@ -77,39 +97,49 @@ export default function CargaTrabajoCorregida() {
     }));
   };
 
-  // Verificar autenticación SIN REDIRECCIONES AUTOMÁTICAS
+  // ✅ VERIFICACIÓN DE AUTENTICACIÓN MEJORADA (sin auto-redirecciones)
   useEffect(() => {
     const checkAuthAndLoadData = async () => {
       try {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
+          console.log('✅ Usuario autenticado:', currentUser.email);
           setUser(currentUser);
           await cargarDatos(currentUser.id);
         } else {
-          // Solo mostrar error, no redirigir automáticamente
-          setError('No hay usuario autenticado');
+          console.log('❌ No hay usuario autenticado');
+          setError('No hay usuario autenticado. Por favor, inicia sesión.');
+          setIsLoading(false);
         }
       } catch (error) {
-        console.error('Error de autenticación:', error);
+        console.error('❌ Error de autenticación:', error);
         setError('Error de autenticación');
+        setIsLoading(false);
       }
     };
 
     checkAuthAndLoadData();
-  }, []); // Sin dependencias que causen re-renders
+  }, []);
 
   const cargarDatos = async (userId) => {
     setIsLoading(true);
     setError("");
     
     try {
-      // Cargar trabajadores
+      console.log('🔄 Cargando datos para usuario:', userId);
+
+      // ✅ CARGAR TRABAJADORES con filtro estricto por user_id
       const { data: trabajadoresData, error: errorTrabajadores } = await supabase
         .from('trabajadores')
         .select('*')
         .eq('user_id', userId);
 
-      if (errorTrabajadores) throw errorTrabajadores;
+      if (errorTrabajadores) {
+        console.error('❌ Error trabajadores:', errorTrabajadores);
+        throw errorTrabajadores;
+      }
+      
+      console.log('✅ Trabajadores cargados:', trabajadoresData?.length || 0);
       
       const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
         id: t.id,
@@ -127,14 +157,24 @@ export default function CargaTrabajoCorregida() {
         setTrabajadorActivo(trabajadoresProcesados[0].id);
       }
 
-      // Cargar servicios
+      // ✅ CARGAR SERVICIOS con filtro estricto por user_id
       const { data: serviciosData, error: errorServicios } = await supabase
         .from('servicios')
         .select('*')
         .eq('user_id', userId);
 
-      if (errorServicios) throw errorServicios;
-      setServicios(serviciosData || []);
+      if (errorServicios) {
+        console.error('❌ Error servicios:', errorServicios);
+        throw errorServicios;
+      }
+
+      console.log('✅ Servicios cargados:', serviciosData?.length || 0, 'para usuario:', userId);
+      
+      // ✅ FILTRO ADICIONAL: Asegurar que solo servicios del usuario actual
+      const serviciosFiltrados = (serviciosData || []).filter(s => s.user_id === userId);
+      console.log('✅ Servicios después del filtro:', serviciosFiltrados.length);
+      
+      setServicios(serviciosFiltrados);
 
       // Cargar reservas
       await cargarReservas(userId);
@@ -143,7 +183,7 @@ export default function CargaTrabajoCorregida() {
       await cargarBloqueos(userId);
 
     } catch (error) {
-      console.error('Error cargando datos:', error);
+      console.error('❌ Error cargando datos:', error);
       setError('Error cargando datos. Por favor, recarga la página.');
     } finally {
       setIsLoading(false);
@@ -152,6 +192,7 @@ export default function CargaTrabajoCorregida() {
 
   const cargarReservas = async (userId) => {
     try {
+      // ✅ CARGAR RESERVAS con filtro estricto
       const { data: reservasData, error: errorReservas } = await supabase
         .from('reservas')
         .select('*')
@@ -160,10 +201,12 @@ export default function CargaTrabajoCorregida() {
         .order('hora', { ascending: true });
 
       if (errorReservas) {
-        console.error('Error cargando reservas:', errorReservas);
+        console.error('❌ Error cargando reservas:', errorReservas);
         showMessage('Error cargando algunas reservas', 'error');
         return;
       }
+      
+      console.log('✅ Reservas cargadas:', reservasData?.length || 0);
       
       const reservasProcesadas = (reservasData || []).map((r) => ({
         id: r.id,
@@ -180,57 +223,48 @@ export default function CargaTrabajoCorregida() {
       setReservas(reservasProcesadas);
       setReservasFiltradas(reservasProcesadas);
     } catch (error) {
-      console.error('Error cargando reservas:', error);
+      console.error('❌ Error cargando reservas:', error);
       showMessage('Error cargando reservas', 'error');
     }
   };
 
   const cargarBloqueos = async (userId) => {
     try {
-      // Buscar en una tabla de bloqueos (si existe) o crear estructura temporal
       const { data: bloqueosData, error: errorBloqueos } = await supabase
         .from('bloqueos')
         .select('*')
         .eq('user_id', userId);
 
       if (errorBloqueos && errorBloqueos.code !== 'PGRST116') {
-        console.error('Error cargando bloqueos:', errorBloqueos);
-        // Si no existe la tabla, crear estructura temporal en memoria
+        console.error('❌ Error cargando bloqueos:', errorBloqueos);
         setBloqueos([]);
         return;
       }
       
       setBloqueos(bloqueosData || []);
     } catch (error) {
-      console.error('Error cargando bloqueos:', error);
+      console.error('❌ Error cargando bloqueos:', error);
       setBloqueos([]);
     }
   };
 
-  // Función mejorada para verificar disponibilidad con duración exacta
+  // ✅ FUNCIÓN MEJORADA: Verificar disponibilidad con validación de fechas pasadas
   const estaDisponible = (trabajadorId, fecha, horaInicio, duracionMinutos = 30) => {
     const trabajador = trabajadores.find(t => t.id === trabajadorId);
     if (!trabajador) return false;
 
-    const fechaObj = new Date(fecha);
-    const hoy = new Date();
-    const esHoy = fechaObj.toDateString() === hoy.toDateString();
-
-    // Si es hoy, verificar que la hora no haya pasado
-    if (esHoy) {
-      const [horaIni, minIni] = horaInicio.split(':').map(Number);
-      const horaActual = hoy.getHours();
-      const minutoActual = hoy.getMinutes();
-      
-      if (horaIni < horaActual || (horaIni === horaActual && minIni <= minutoActual)) {
-        return false; // La hora ya pasó
-      }
+    // ✅ VALIDACIÓN: No permitir fechas/horas pasadas
+    if (esFechaHoraPasada(fecha, horaInicio)) {
+      return false;
     }
 
+    const fechaObj = new Date(fecha);
+    
     // Verificar límite de días de reserva
+    const hoy = new Date();
     const diasDiferencia = Math.ceil((fechaObj - hoy) / (1000 * 60 * 60 * 24));
     if (diasDiferencia > trabajador.limiteDiasReserva) {
-      return false; // Excede el límite de días
+      return false;
     }
 
     const diaSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][fechaObj.getDay()];
@@ -311,14 +345,12 @@ export default function CargaTrabajoCorregida() {
 
     const horasSet = new Set();
     
-    // Para cada día de la semana, obtener las franjas horarias
     Object.values(trabajador.horariosTrabajo || {}).forEach(horarioDia => {
       if (horarioDia.activo && horarioDia.franjas) {
         horarioDia.franjas.forEach(franja => {
           const [horaIni, minIni] = franja.inicio.split(':').map(Number);
           const [horaFin, minFin] = franja.fin.split(':').map(Number);
           
-          // Generar slots cada 30 minutos dentro de la franja
           for (let minutos = horaIni * 60 + minIni; minutos < horaFin * 60 + minFin; minutos += 30) {
             const hora = Math.floor(minutos / 60);
             const min = minutos % 60;
@@ -332,7 +364,7 @@ export default function CargaTrabajoCorregida() {
     return Array.from(horasSet).sort();
   };
 
-  // Función mejorada para buscar disponibilidades exactas
+  // ✅ FUNCIÓN MEJORADA: Búsqueda de disponibilidad más precisa
   const buscarProximasDisponibilidades = async () => {
     setBuscandoDisponibilidad(true);
     
@@ -347,19 +379,40 @@ export default function CargaTrabajoCorregida() {
         return;
       }
       
-      // Obtener duración del servicio
-      let duracionServicio = 30;
+      // ✅ OBTENER DURACIÓN EXACTA DEL SERVICIO
+      let duracionServicio = 30; // Por defecto
+      let servicioSeleccionado = null;
+      
       if (busquedaDisponibilidad.servicio) {
-        const servicio = servicios.find(s => s.id.toString() === busquedaDisponibilidad.servicio);
-        if (servicio) duracionServicio = servicio.duracion;
+        servicioSeleccionado = servicios.find(s => s.id.toString() === busquedaDisponibilidad.servicio);
+        if (servicioSeleccionado) {
+          duracionServicio = servicioSeleccionado.duracion;
+          console.log('🎯 Servicio seleccionado:', servicioSeleccionado.nombre, 'Duración:', duracionServicio, 'min');
+        }
       }
       
       const maxDias = trabajador.limiteDiasReserva;
+      let diasBuscados = 0;
       
-      for (let dia = 0; dia < maxDias && resultados.length < busquedaDisponibilidad.cantidadResultados; dia++) {
+      console.log('🔍 Buscando disponibilidad:', {
+        trabajador: trabajador.nombre,
+        servicio: servicioSeleccionado?.nombre || 'Cualquiera',
+        duracion: duracionServicio,
+        desde: busquedaDisponibilidad.fechaDesde,
+        horaDesde: busquedaDisponibilidad.horaDesde
+      });
+      
+      for (let dia = 0; dia < maxDias && resultados.length < busquedaDisponibilidad.cantidadResultados && diasBuscados < 90; dia++) {
         const fecha = new Date(fechaInicio);
         fecha.setDate(fechaInicio.getDate() + dia);
         const fechaStr = fecha.toISOString().split('T')[0];
+        
+        // ✅ NO BUSCAR EN FECHAS PASADAS
+        if (esFechaHoraPasada(fechaStr)) {
+          continue;
+        }
+        
+        diasBuscados++;
         
         const diaSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][fecha.getDay()];
         const horarioDia = trabajador.horariosTrabajo[diaSemana];
@@ -371,8 +424,8 @@ export default function CargaTrabajoCorregida() {
           const [horaIni, minIni] = franja.inicio.split(':').map(Number);
           const [horaFin, minFin] = franja.fin.split(':').map(Number);
           
-          // Buscar huecos exactos con la duración del servicio
-          for (let minutos = horaIni * 60 + minIni; minutos <= (horaFin * 60 + minFin) - duracionServicio; minutos += 5) {
+          // ✅ BUSCAR EN INTERVALOS DE 15 MINUTOS para mayor precisión
+          for (let minutos = horaIni * 60 + minIni; minutos <= (horaFin * 60 + minFin) - duracionServicio; minutos += 15) {
             const hora = Math.floor(minutos / 60);
             const min = minutos % 60;
             const horaStr = `${hora.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
@@ -383,12 +436,14 @@ export default function CargaTrabajoCorregida() {
               if (minutos < horaMinima * 60 + minMinimo) continue;
             }
             
+            // ✅ VERIFICAR DISPONIBILIDAD CON DURACIÓN EXACTA
             if (estaDisponible(trabajadorId, fechaStr, horaStr, duracionServicio)) {
               resultados.push({
                 fecha: fechaStr,
                 hora: horaStr,
                 trabajador: trabajador,
                 duracion: duracionServicio,
+                servicio: servicioSeleccionado,
                 fechaFormateada: fecha.toLocaleDateString('es-ES', { 
                   weekday: 'long', 
                   day: 'numeric', 
@@ -401,15 +456,20 @@ export default function CargaTrabajoCorregida() {
           }
           if (resultados.length >= busquedaDisponibilidad.cantidadResultados) break;
         }
+        if (resultados.length >= busquedaDisponibilidad.cantidadResultados) break;
       }
       
+      console.log('✅ Resultados encontrados:', resultados.length);
       setResultadosDisponibilidad(resultados);
+      
       if (resultados.length === 0) {
         showMessage('No se encontraron disponibilidades con los criterios seleccionados', 'error');
+      } else {
+        showMessage(`Se encontraron ${resultados.length} disponibilidades`, 'success');
       }
       
     } catch (error) {
-      console.error('Error buscando disponibilidades:', error);
+      console.error('❌ Error buscando disponibilidades:', error);
       showMessage('Error al buscar disponibilidades', 'error');
     } finally {
       setBuscandoDisponibilidad(false);
@@ -458,7 +518,6 @@ export default function CargaTrabajoCorregida() {
       const fechaReserva = fecha.toISOString().split('T')[0];
       const fechaDiaStr = fechaDia.toISOString().split('T')[0];
       
-      // Comparar intervalos de 30 minutos
       const [horaRes, minRes] = r.hora.split(':').map(Number);
       const [horaSlot, minSlot] = hora.split(':').map(Number);
       const minutosReserva = horaRes * 60 + minRes;
@@ -521,9 +580,10 @@ export default function CargaTrabajoCorregida() {
     return `${inicio.toLocaleDateString('es-ES', opciones)} - ${fin.toLocaleDateString('es-ES', opciones)}`;
   };
 
+  // ✅ FUNCIÓN MEJORADA: Verificar si día no disponible O si es fecha pasada
   const esDiaNoDisponible = (dia) => {
     const trabajador = trabajadores.find(t => t.id === trabajadorActivo);
-    if (!trabajador) return false;
+    if (!trabajador) return true;
     
     const inicioSemana = getInicioSemana(fechaActual);
     const diaIndice = diasSemana.indexOf(dia);
@@ -531,18 +591,48 @@ export default function CargaTrabajoCorregida() {
     fechaDia.setDate(inicioSemana.getDate() + diaIndice);
     const fechaStr = fechaDia.toISOString().split('T')[0];
     
+    // ✅ VERIFICAR SI ES FECHA PASADA
+    if (esFechaHoraPasada(fechaStr)) return true;
+    
     const diaSemanaKey = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][fechaDia.getDay()];
     const horarioDia = trabajador.horariosTrabajo[diaSemanaKey];
     
     return !horarioDia || !horarioDia.activo || trabajador.festivos.includes(fechaStr);
   };
 
-  const abrirModal = (dia, hora, reserva) => {
+  // ✅ FUNCIÓN MEJORADA: Verificar si slot específico es clickeable
+  const esSlotClickeable = (dia, hora) => {
+    const inicioSemana = getInicioSemana(fechaActual);
+    const diaIndice = diasSemana.indexOf(dia);
+    const fechaDia = new Date(inicioSemana);
+    fechaDia.setDate(inicioSemana.getDate() + diaIndice);
+    const fechaStr = fechaDia.toISOString().split('T')[0];
+    
+    // ✅ NO CLICKEABLE SI ES FECHA/HORA PASADA
+    if (esFechaHoraPasada(fechaStr, hora)) return false;
+    
+    // ✅ NO CLICKEABLE SI EL DÍA NO ESTÁ DISPONIBLE
+    if (esDiaNoDisponible(dia)) return false;
+    
+    // ✅ NO CLICKEABLE SI HAY BLOQUEOS
+    const bloqueosEnSlot = getBloqueosPorDiaHora(dia, hora);
+    if (bloqueosEnSlot.length > 0) return false;
+    
+    return true;
+  };
+
+  const abrirModal = (dia, hora, reserva = null) => {
     const inicioSemana = getInicioSemana(fechaActual);
     const diaIndice = diasSemana.indexOf(dia);
     const fecha = new Date(inicioSemana);
     fecha.setDate(inicioSemana.getDate() + diaIndice);
     const iso = fecha.toISOString().split("T")[0];
+    
+    // ✅ VALIDACIÓN: No abrir modal para fechas/horas pasadas
+    if (!reserva && esFechaHoraPasada(iso, hora)) {
+      showMessage('No puedes crear reservas en fechas u horas pasadas', 'error');
+      return;
+    }
     
     if (reserva) {
       setModalData({
@@ -593,9 +683,14 @@ export default function CargaTrabajoCorregida() {
       return;
     }
 
-    // SIN VALIDACIONES OBLIGATORIAS - Solo nombre mínimo
     if (!modalFormData.nombre.trim()) {
       showMessage('El nombre es requerido', 'error');
+      return;
+    }
+
+    // ✅ VALIDACIÓN: No permitir guardar reservas en fechas/horas pasadas
+    if (!modalData?.id && esFechaHoraPasada(modalData?.fecha, modalFormData.hora)) {
+      showMessage('No puedes crear reservas en fechas u horas pasadas', 'error');
       return;
     }
 
@@ -656,7 +751,7 @@ export default function CargaTrabajoCorregida() {
       });
       
     } catch (error) {
-      console.error('Error guardando reserva:', error);
+      console.error('❌ Error guardando reserva:', error);
       showMessage(`Error al guardar la reserva: ${error.message}`, 'error');
     } finally {
       setGuardandoReserva(false);
@@ -679,13 +774,11 @@ export default function CargaTrabajoCorregida() {
         user_id: user.id
       };
 
-      // Intentar guardar en tabla bloqueos (si existe)
       const { error } = await supabase
         .from('bloqueos')
         .insert([nuevoBloqueo]);
 
       if (error) {
-        // Si no existe la tabla, guardar temporalmente en memoria
         setBloqueos([...bloqueos, { ...nuevoBloqueo, id: Date.now() }]);
         showMessage('Bloqueo guardado temporalmente (crear tabla bloqueos en Supabase)', 'success');
       } else {
@@ -702,7 +795,7 @@ export default function CargaTrabajoCorregida() {
       });
       
     } catch (error) {
-      console.error('Error guardando bloqueo:', error);
+      console.error('❌ Error guardando bloqueo:', error);
       showMessage(`Error al guardar el bloqueo: ${error.message}`, 'error');
     }
   };
@@ -722,7 +815,7 @@ export default function CargaTrabajoCorregida() {
       await cargarReservas(user.id);
       showMessage('Reserva eliminada exitosamente', 'success');
     } catch (error) {
-      console.error('Error al eliminar reserva:', error);
+      console.error('❌ Error al eliminar reserva:', error);
       showMessage('Error al eliminar la reserva', 'error');
     }
   };
@@ -736,7 +829,12 @@ export default function CargaTrabajoCorregida() {
     const diaIndice = diasSemana.indexOf(nombreDia);
     const fechaDia = new Date(inicioSemana);
     fechaDia.setDate(inicioSemana.getDate() + diaIndice);
-    return `${nombreDia} ${fechaDia.getDate()}`;
+    
+    // ✅ INDICAR SI ES FECHA PASADA
+    const esPasada = esFechaHoraPasada(fechaDia.toISOString().split('T')[0]);
+    const texto = `${nombreDia} ${fechaDia.getDate()}`;
+    
+    return esPasada ? `${texto} (pasado)` : texto;
   };
 
   const esReservaResaltada = (reserva) => {
@@ -774,18 +872,28 @@ export default function CargaTrabajoCorregida() {
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
-        <div className="text-center bg-white p-8 rounded-2xl shadow-lg">
+        <div className="text-center bg-white p-8 rounded-2xl shadow-lg max-w-md">
           <div className="text-red-500 mb-4">
             <AlertCircle className="w-12 h-12 mx-auto" />
           </div>
           <h2 className="text-xl font-bold text-gray-800 mb-2">Error</h2>
           <p className="text-gray-600 mb-4">{error}</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors"
-          >
-            Recargar página
-          </button>
+          <div className="space-y-3">
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors w-full"
+            >
+              Recargar página
+            </button>
+            {error.includes('autenticado') && (
+              <button 
+                onClick={() => router.push('/login')}
+                className="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600 transition-colors w-full"
+              >
+                Ir a Login
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -906,7 +1014,6 @@ export default function CargaTrabajoCorregida() {
 
             {/* Buscador y herramientas */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              {/* Botón de disponibilidad */}
               <button
                 onClick={() => setModalDisponibilidad(true)}
                 className="flex items-center justify-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-medium"
@@ -917,7 +1024,6 @@ export default function CargaTrabajoCorregida() {
                 <span className="sm:hidden">Buscar</span>
               </button>
 
-              {/* Buscador */}
               <div className="relative min-w-0 flex-1 sm:w-auto sm:flex-none">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1 sm:w-48">
@@ -1004,32 +1110,41 @@ export default function CargaTrabajoCorregida() {
                     const bloqueosEnSlot = getBloqueosPorDiaHora(dia, hora);
                     const noDisponible = esDiaNoDisponible(dia);
                     const hayBloqueo = bloqueosEnSlot.length > 0;
+                    const esClickeable = esSlotClickeable(dia, hora);
+                    
+                    // ✅ DETERMINAR COLOR Y ESTADO DEL SLOT
+                    let claseSlot = 'border-t border-l border-gray-200 p-2 min-h-16 transition-colors group relative overflow-hidden ';
+                    
+                    if (noDisponible) {
+                      claseSlot += 'bg-red-50 cursor-not-allowed';
+                    } else if (hayBloqueo) {
+                      claseSlot += 'bg-orange-50 cursor-not-allowed';
+                    } else if (!esClickeable) {
+                      claseSlot += 'bg-gray-100 cursor-not-allowed opacity-50';
+                    } else {
+                      claseSlot += 'bg-white hover:bg-blue-25 cursor-pointer';
+                    }
                     
                     return (
                       <div
                         key={dia + hora}
-                        className={`border-t border-l border-gray-200 p-2 min-h-16 cursor-pointer transition-colors group relative overflow-hidden ${
-                          noDisponible 
-                            ? 'bg-red-50 hover:bg-red-100' 
-                            : hayBloqueo
-                              ? 'bg-orange-50 hover:bg-orange-100'
-                              : 'bg-white hover:bg-blue-25'
-                        }`}
-                        onClick={() => !noDisponible && !hayBloqueo && abrirModal(dia, hora)}
+                        className={claseSlot}
+                        onClick={() => esClickeable && abrirModal(dia, hora)}
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          if (!noDisponible) abrirModalBloqueo(dia, hora);
+                          if (esClickeable) abrirModalBloqueo(dia, hora);
                         }}
+                        title={!esClickeable ? 'Hora no disponible' : 'Click para crear reserva, click derecho para bloquear'}
                       >
-                        {/* Add button on hover */}
-                        {!noDisponible && !hayBloqueo && (
+                        {/* Add button on hover para slots clickeables */}
+                        {esClickeable && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-blue-50">
                             <Plus className="w-6 h-6 text-blue-400" />
                           </div>
                         )}
 
-                        {/* Block button on right click */}
-                        {!noDisponible && (
+                        {/* Block button para slots válidos */}
+                        {esClickeable && (
                           <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={(e) => {
@@ -1037,7 +1152,7 @@ export default function CargaTrabajoCorregida() {
                                 abrirModalBloqueo(dia, hora);
                               }}
                               className="p-1 rounded bg-orange-100 text-orange-600 hover:bg-orange-200"
-                              title="Bloquear horario (click derecho)"
+                              title="Bloquear horario"
                             >
                               <Ban className="w-3 h-3" />
                             </button>
@@ -1064,7 +1179,7 @@ export default function CargaTrabajoCorregida() {
                           </div>
                         ))}
 
-                        {/* Existing reservations */}
+                        {/* Reservas existentes */}
                         <div className="relative z-10 space-y-1">
                           {reservasEnSlot.map((r) => {
                             const esResaltada = esReservaResaltada(r);
@@ -1134,10 +1249,12 @@ export default function CargaTrabajoCorregida() {
                           })}
                         </div>
                         
-                        {/* Día no disponible indicator */}
-                        {noDisponible && reservasEnSlot.length === 0 && bloqueosEnSlot.length === 0 && (
+                        {/* Indicadores de estado */}
+                        {!esClickeable && reservasEnSlot.length === 0 && bloqueosEnSlot.length === 0 && (
                           <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="text-red-400 text-xs font-medium">No disponible</div>
+                            <div className="text-gray-400 text-xs font-medium">
+                              {noDisponible ? 'No disponible' : 'Hora pasada'}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1302,7 +1419,7 @@ export default function CargaTrabajoCorregida() {
         </div>
       </div>
 
-      {/* Modal de Reserva - SIN VALIDACIONES OBLIGATORIAS */}
+      {/* Modal de Reserva */}
       {modalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[95vh] flex flex-col">
@@ -1374,9 +1491,15 @@ export default function CargaTrabajoCorregida() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   >
                     <option value="">Selecciona una hora</option>
-                    {horasFormulario.map((hora) => (
-                      <option key={hora} value={hora}>{hora}</option>
-                    ))}
+                    {horasFormulario
+                      .filter(hora => {
+                        // ✅ FILTRAR HORAS PASADAS EN EL SELECTOR
+                        if (modalData?.id) return true; // Si es edición, permitir cualquier hora
+                        return !esFechaHoraPasada(modalData?.fecha, hora);
+                      })
+                      .map((hora) => (
+                        <option key={hora} value={hora}>{hora}</option>
+                      ))}
                   </select>
                 </div>
 
@@ -1449,6 +1572,7 @@ export default function CargaTrabajoCorregida() {
                     type="date"
                     value={bloqueoFormData.fecha}
                     onChange={(e) => setBloqueoFormData(prev => ({ ...prev, fecha: e.target.value }))}
+                    min={new Date().toISOString().split('T')[0]}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
                   />
                 </div>
@@ -1592,6 +1716,7 @@ export default function CargaTrabajoCorregida() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
                     >
                       <option value="">Cualquier servicio</option>
+                      {/* ✅ MOSTRAR SOLO SERVICIOS DEL USUARIO ACTUAL */}
                       {servicios.map(servicio => (
                         <option key={servicio.id} value={servicio.id}>
                           {servicio.nombre} ({servicio.duracion}min)
@@ -1691,7 +1816,13 @@ export default function CargaTrabajoCorregida() {
                                 <User className="w-4 h-4" />
                                 <span>{resultado.trabajador.nombre}</span>
                               </div>
-                              {resultado.duracion !== 30 && (
+                              {resultado.servicio && (
+                                <div className="flex items-center gap-1">
+                                  <Clock className="w-4 h-4" />
+                                  <span>{resultado.servicio.nombre} ({resultado.duracion} min)</span>
+                                </div>
+                              )}
+                              {!resultado.servicio && resultado.duracion !== 30 && (
                                 <div className="flex items-center gap-1">
                                   <Clock className="w-4 h-4" />
                                   <span>{resultado.duracion} min</span>
