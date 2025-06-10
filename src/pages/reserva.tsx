@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Clock, User, Mail, Phone, Scissors, Check, AlertCircle, Loader2, Edit3, X, MapPin, Star } from 'lucide-react';
+import { Calendar, Clock, User, Mail, Phone, Scissors, Check, AlertCircle, Loader2, Edit3, X, MapPin, Star, Search, ChevronRight } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useRouter } from 'next/router';
 
@@ -22,6 +22,11 @@ export default function ReservationSystem({ businessId }) {
   const [reservationConfirmed, setReservationConfirmed] = useState(false);
   const [availableTimes, setAvailableTimes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // ✅ NUEVO: Estados para disponibilidad alternativa
+  const [suggestedTimes, setSuggestedTimes] = useState([]);
+  const [showingSuggestions, setShowingSuggestions] = useState(false);
+  const [searchingAlternatives, setSearchingAlternatives] = useState(false);
   
   // Datos de configuración
   const [services, setServices] = useState([]);
@@ -99,7 +104,10 @@ export default function ReservationSystem({ businessId }) {
           const processedWorkers = (workersData || []).map((worker) => ({
             ...worker,
             servicios: worker.servicios || [],
-            festivos: worker.festivos || []
+            festivos: worker.festivos || [],
+            horariosTrabajo: worker.horariosTrabajo || {},
+            tiempoDescanso: worker.tiempoDescanso || 15,
+            limiteDiasReserva: worker.limiteDiasReserva || 30
           }));
           setWorkers(processedWorkers);
         }
@@ -126,24 +134,97 @@ export default function ReservationSystem({ businessId }) {
     loadBusinessData();
   }, [currentBusinessId]);
 
+  // ✅ FUNCIÓN NUEVA: Verificar si está disponible con horarios de trabajo
+  const isTimeSlotAvailable = (workerId, date, time, serviceDuration = 30) => {
+    const worker = workers.find(w => w.id === workerId);
+    if (!worker) return false;
+
+    // Verificar días festivos
+    if (worker.festivos && worker.festivos.includes(date)) return false;
+
+    // Verificar horarios de trabajo
+    const dateObj = new Date(date);
+    const dayOfWeek = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][dateObj.getDay()];
+    const workingHours = worker.horariosTrabajo[dayOfWeek];
+    
+    if (!workingHours || !workingHours.activo) return false;
+
+    // Convertir time a minutos
+    const [hour, minute] = time.split(':').map(Number);
+    const timeInMinutes = hour * 60 + minute;
+    const endTimeInMinutes = timeInMinutes + serviceDuration;
+
+    // Verificar si está dentro de alguna franja horaria
+    let withinWorkingHours = false;
+    if (workingHours.franjas) {
+      for (const franja of workingHours.franjas) {
+        const [startHour, startMin] = franja.inicio.split(':').map(Number);
+        const [endHour, endMin] = franja.fin.split(':').map(Number);
+        const franjaStart = startHour * 60 + startMin;
+        const franjaEnd = endHour * 60 + endMin;
+        
+        if (timeInMinutes >= franjaStart && endTimeInMinutes <= franjaEnd) {
+          withinWorkingHours = true;
+          break;
+        }
+      }
+    }
+
+    if (!withinWorkingHours) return false;
+
+    // Verificar conflictos con reservas existentes
+    const conflicts = existingReservations.filter(reservation => 
+      reservation.trabajador === workerId &&
+      reservation.fecha === date &&
+      reservation.estado !== 'cancelada'
+    );
+
+    for (const conflict of conflicts) {
+      const [conflictHour, conflictMin] = conflict.hora.split(':').map(Number);
+      const conflictTime = conflictHour * 60 + conflictMin;
+      
+      // Obtener duración del servicio en conflicto
+      const conflictService = services.find(s => s.id === conflict.servicio_id);
+      const conflictDuration = conflictService ? conflictService.duracion : 30;
+      const conflictEndTime = conflictTime + conflictDuration + (worker.tiempoDescanso || 15);
+      
+      // Verificar solapamiento
+      if (!(endTimeInMinutes + (worker.tiempoDescanso || 15) <= conflictTime || timeInMinutes >= conflictEndTime)) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   // Generar horarios disponibles basados en trabajador y fecha seleccionada
   const generateAvailableTimes = useCallback(() => {
     if (!formData.worker || !formData.date) {
       setAvailableTimes([]);
+      setSuggestedTimes([]);
+      setShowingSuggestions(false);
       return;
     }
 
     const selectedWorker = workers.find(w => w.id === formData.worker);
     if (!selectedWorker) {
       setAvailableTimes([]);
+      setSuggestedTimes([]);
+      setShowingSuggestions(false);
       return;
     }
+
+    // Obtener duración del servicio seleccionado
+    const selectedService = services.find(s => s.id.toString() === formData.service);
+    const serviceDuration = selectedService ? selectedService.duracion : 30;
 
     // Verificar si la fecha es un día festivo para el trabajador
     const dateString = formData.date;
     
     if (selectedWorker.festivos && selectedWorker.festivos.includes(dateString)) {
       setAvailableTimes([]);
+      // ✅ BUSCAR ALTERNATIVAS si es día festivo
+      searchAlternativeSlots();
       return;
     }
 
@@ -154,25 +235,116 @@ export default function ReservationSystem({ businessId }) {
         if (hour === 21 && minute > 45) break; // No pasar de 21:45
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
         
-        // Verificar si el slot está ocupado
-        const isOccupied = existingReservations.some(reservation => 
-          reservation.trabajador === formData.worker &&
-          reservation.fecha === dateString &&
-          reservation.hora === timeString
-        );
-
-        if (!isOccupied) {
+        // ✅ USAR NUEVA FUNCIÓN DE VERIFICACIÓN
+        if (isTimeSlotAvailable(formData.worker, dateString, timeString, serviceDuration)) {
           slots.push(timeString);
         }
       }
     }
 
     setAvailableTimes(slots);
-  }, [formData.worker, formData.date, existingReservations, workers]);
+    
+    // ✅ Si no hay slots disponibles, buscar alternativas
+    if (slots.length === 0) {
+      searchAlternativeSlots();
+    } else {
+      setSuggestedTimes([]);
+      setShowingSuggestions(false);
+    }
+  }, [formData.worker, formData.date, formData.service, existingReservations, workers, services]);
+
+  // ✅ FUNCIÓN NUEVA: Buscar horarios alternativos
+  const searchAlternativeSlots = useCallback(async () => {
+    if (!formData.worker || !formData.date) return;
+    
+    setSearchingAlternatives(true);
+    
+    try {
+      const selectedWorker = workers.find(w => w.id === formData.worker);
+      if (!selectedWorker) return;
+
+      const selectedService = services.find(s => s.id.toString() === formData.service);
+      const serviceDuration = selectedService ? selectedService.duracion : 30;
+      
+      const suggestions = [];
+      const startDate = new Date(formData.date);
+      const maxDays = selectedWorker.limiteDiasReserva || 30;
+      
+      // Buscar en los próximos días
+      for (let dayOffset = 0; dayOffset < Math.min(maxDays, 14) && suggestions.length < 3; dayOffset++) {
+        const searchDate = new Date(startDate);
+        searchDate.setDate(startDate.getDate() + dayOffset);
+        const searchDateString = searchDate.toISOString().split('T')[0];
+        
+        // Verificar que no sea una fecha pasada
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (searchDate < today) continue;
+        
+        // Si es el mismo día, empezar desde la hora actual + 1 hora
+        let startHour = 8;
+        if (dayOffset === 0) {
+          const now = new Date();
+          startHour = Math.max(8, now.getHours() + 1);
+        }
+        
+        // Buscar slots en este día
+        for (let hour = startHour; hour <= 21 && suggestions.length < 3; hour++) {
+          for (let minute = 0; minute < 60; minute += 30) {
+            if (hour === 21 && minute > 30) break;
+            
+            const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+            
+            if (isTimeSlotAvailable(formData.worker, searchDateString, timeString, serviceDuration)) {
+              suggestions.push({
+                date: searchDateString,
+                time: timeString,
+                dateFormatted: searchDate.toLocaleDateString('es-ES', { 
+                  weekday: 'long', 
+                  day: 'numeric', 
+                  month: 'long' 
+                }),
+                worker: selectedWorker,
+                service: selectedService
+              });
+              
+              if (suggestions.length >= 3) break;
+            }
+          }
+        }
+      }
+      
+      setSuggestedTimes(suggestions);
+      setShowingSuggestions(suggestions.length > 0);
+      
+    } catch (error) {
+      console.error('Error buscando horarios alternativos:', error);
+    } finally {
+      setSearchingAlternatives(false);
+    }
+  }, [formData.worker, formData.date, formData.service, workers, services]);
 
   useEffect(() => {
     generateAvailableTimes();
   }, [generateAvailableTimes]);
+
+  // ✅ FUNCIÓN NUEVA: Seleccionar horario sugerido
+  const selectSuggestedTime = (suggestion) => {
+    setFormData(prev => ({
+      ...prev,
+      date: suggestion.date,
+      time: suggestion.time
+    }));
+    setShowingSuggestions(false);
+    setSuggestedTimes([]);
+    
+    // Limpiar errores
+    setErrors(prev => ({
+      ...prev,
+      date: '',
+      time: ''
+    }));
+  };
 
   // Obtener servicios disponibles para el trabajador seleccionado
   const getAvailableServices = () => {
@@ -259,14 +431,18 @@ export default function ReservationSystem({ businessId }) {
         service: '',
         time: ''
       }));
+      setSuggestedTimes([]);
+      setShowingSuggestions(false);
     }
 
-    // Limpiar horarios si cambia la fecha
-    if (name === 'date') {
+    // Limpiar horarios si cambia la fecha o servicio
+    if (name === 'date' || name === 'service') {
       setFormData(prev => ({
         ...prev,
         time: ''
       }));
+      setSuggestedTimes([]);
+      setShowingSuggestions(false);
     }
 
     // Limpiar error del campo cuando el usuario empiece a escribir
@@ -288,6 +464,8 @@ export default function ReservationSystem({ businessId }) {
       telefono: formData.phone
     };
 
+    const selectedService = services.find(s => s.id.toString() === formData.service);
+
     const { data, error } = await supabase
       .from('reservas')
       .insert([{
@@ -296,6 +474,8 @@ export default function ReservationSystem({ businessId }) {
         hora: formData.time,
         cliente: cliente,
         observaciones: formData.notes || '',
+        servicio_id: selectedService ? selectedService.id : null,
+        estado: 'confirmada',
         user_id: currentBusinessId
       }])
       .select()
@@ -385,6 +565,8 @@ export default function ReservationSystem({ businessId }) {
     });
     setReservationConfirmed(false);
     setErrors({});
+    setSuggestedTimes([]);
+    setShowingSuggestions(false);
   };
 
   if (isLoading) {
@@ -699,7 +881,7 @@ export default function ReservationSystem({ businessId }) {
                     {errors.time}
                   </p>
                 )}
-                {formData.date && availableTimes.length === 0 && (
+                {formData.date && availableTimes.length === 0 && !searchingAlternatives && (
                   <p className="text-amber-600 text-sm mt-2 flex items-center">
                     <AlertCircle className="w-4 h-4 mr-1" />
                     No hay horarios disponibles para esta fecha
@@ -707,6 +889,61 @@ export default function ReservationSystem({ businessId }) {
                 )}
               </div>
             </div>
+
+            {/* ✅ NUEVA SECCIÓN: Horarios Alternativos */}
+            {searchingAlternatives && (
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+                  <h3 className="font-semibold text-blue-800">
+                    Buscando horarios alternativos...
+                  </h3>
+                </div>
+              </div>
+            )}
+
+            {showingSuggestions && suggestedTimes.length > 0 && (
+              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Search className="w-5 h-5 text-green-600" />
+                  <h3 className="font-semibold text-green-800">
+                    Próximos horarios disponibles:
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {suggestedTimes.map((suggestion, index) => (
+                    <div key={index} className="bg-white rounded-lg p-3 border border-green-200 hover:border-green-300 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Calendar className="w-4 h-4 text-green-600" />
+                            <span className="font-medium text-gray-800">
+                              {suggestion.dateFormatted}
+                            </span>
+                            <span className="text-green-700 font-semibold">
+                              {suggestion.time}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {suggestion.service?.nombre} con {suggestion.worker.nombre}
+                            {suggestion.service?.duracion && (
+                              <span> • {suggestion.service.duracion} min</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => selectSuggestedTime(suggestion)}
+                          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                        >
+                          Seleccionar
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Notas adicionales */}
             <div>
