@@ -38,40 +38,6 @@ const esFechaHoraPasada = (fecha, hora = null) => {
   return fechaHoraObj <= ahora;
 };
 
-// ✅ FUNCIÓN CLAVE: Verificar si una reserva ocupa un slot específico
-const reservaOcupaSlot = (reserva, servicios, slotHora) => {
-  const [horaRes, minRes] = reserva.hora.split(':').map(Number);
-  const [horaSlot, minSlot] = slotHora.split(':').map(Number);
-  
-  const minutosReserva = horaRes * 60 + minRes;
-  const minutosSlot = horaSlot * 60 + minSlot;
-  const minutosSlotFin = minutosSlot + 30; // Cada slot dura 30 min
-  
-  // Obtener duración del servicio
-  const servicio = servicios.find(s => s.id === reserva.servicio_id);
-  const duracionReserva = servicio ? servicio.duracion : 30;
-  const minutosReservaFin = minutosReserva + duracionReserva;
-  
-  // La reserva ocupa el slot si hay solapamiento
-  return !(minutosReservaFin <= minutosSlot || minutosReserva >= minutosSlotFin);
-};
-
-// ✅ FUNCIÓN CLAVE: Determinar el tipo de ocupación del slot
-const getTipoOcupacionSlot = (reserva, servicios, slotHora) => {
-  const [horaRes, minRes] = reserva.hora.split(':').map(Number);
-  const [horaSlot, minSlot] = slotHora.split(':').map(Number);
-  
-  const minutosReserva = horaRes * 60 + minRes;
-  const minutosSlot = horaSlot * 60 + minSlot;
-  
-  // Si la reserva inicia en este slot o muy cerca (dentro de los 30 min del slot)
-  if (minutosReserva >= minutosSlot && minutosReserva < minutosSlot + 30) {
-    return 'principal'; // Slot donde se muestra la reserva completa
-  } else {
-    return 'extension'; // Slot ocupado por extensión de la reserva
-  }
-};
-
 export default function CargaTrabajoCorregida() {
   const router = useRouter();
   const [user, setUser] = useState(null);
@@ -131,7 +97,7 @@ export default function CargaTrabajoCorregida() {
     }));
   };
 
-  // ✅ VERIFICACIÓN DE AUTENTICACIÓN MEJORADA
+  // ✅ VERIFICACIÓN DE AUTENTICACIÓN MEJORADA (sin auto-redirecciones)
   useEffect(() => {
     const checkAuthAndLoadData = async () => {
       try {
@@ -162,7 +128,7 @@ export default function CargaTrabajoCorregida() {
     try {
       console.log('🔄 Cargando datos para usuario:', userId);
 
-      // CARGAR TRABAJADORES
+      // ✅ CARGAR TRABAJADORES con filtro estricto por user_id
       const { data: trabajadoresData, error: errorTrabajadores } = await supabase
         .from('trabajadores')
         .select('*')
@@ -191,7 +157,7 @@ export default function CargaTrabajoCorregida() {
         setTrabajadorActivo(trabajadoresProcesados[0].id);
       }
 
-      // CARGAR SERVICIOS
+      // ✅ CARGAR SERVICIOS con filtro estricto por user_id
       const { data: serviciosData, error: errorServicios } = await supabase
         .from('servicios')
         .select('*')
@@ -202,13 +168,18 @@ export default function CargaTrabajoCorregida() {
         throw errorServicios;
       }
 
-      console.log('✅ Servicios cargados:', serviciosData?.length || 0);
+      console.log('✅ Servicios cargados:', serviciosData?.length || 0, 'para usuario:', userId);
       
+      // ✅ FILTRO ADICIONAL: Asegurar que solo servicios del usuario actual
       const serviciosFiltrados = (serviciosData || []).filter(s => s.user_id === userId);
+      console.log('✅ Servicios después del filtro:', serviciosFiltrados.length);
+      
       setServicios(serviciosFiltrados);
 
-      // Cargar reservas y bloqueos
+      // Cargar reservas
       await cargarReservas(userId);
+
+      // Cargar bloqueos manuales
       await cargarBloqueos(userId);
 
     } catch (error) {
@@ -221,6 +192,7 @@ export default function CargaTrabajoCorregida() {
 
   const cargarReservas = async (userId) => {
     try {
+      // ✅ CARGAR RESERVAS con filtro estricto
       const { data: reservasData, error: errorReservas } = await supabase
         .from('reservas')
         .select('*')
@@ -281,7 +253,7 @@ export default function CargaTrabajoCorregida() {
     const trabajador = trabajadores.find(t => t.id === trabajadorId);
     if (!trabajador) return false;
 
-    // Validación: No permitir fechas/horas pasadas
+    // ✅ VALIDACIÓN: No permitir fechas/horas pasadas
     if (esFechaHoraPasada(fecha, horaInicio)) {
       return false;
     }
@@ -325,7 +297,7 @@ export default function CargaTrabajoCorregida() {
     
     if (!dentroFranja) return false;
     
-    // ✅ VERIFICACIÓN MEJORADA: Considerar duración exacta de reservas existentes
+    // Verificar conflictos con reservas existentes
     const reservasConflicto = reservas.filter(r => 
       r.trabajador === trabajadorId && 
       r.fecha === fecha && 
@@ -392,6 +364,118 @@ export default function CargaTrabajoCorregida() {
     return Array.from(horasSet).sort();
   };
 
+  // ✅ FUNCIÓN MEJORADA: Búsqueda de disponibilidad más precisa
+  const buscarProximasDisponibilidades = async () => {
+    setBuscandoDisponibilidad(true);
+    
+    try {
+      const resultados = [];
+      const fechaInicio = new Date(busquedaDisponibilidad.fechaDesde);
+      const trabajadorId = busquedaDisponibilidad.trabajador || trabajadorActivo;
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      
+      if (!trabajador) {
+        showMessage('Selecciona un trabajador válido', 'error');
+        return;
+      }
+      
+      // ✅ OBTENER DURACIÓN EXACTA DEL SERVICIO
+      let duracionServicio = 30; // Por defecto
+      let servicioSeleccionado = null;
+      
+      if (busquedaDisponibilidad.servicio) {
+        servicioSeleccionado = servicios.find(s => s.id.toString() === busquedaDisponibilidad.servicio);
+        if (servicioSeleccionado) {
+          duracionServicio = servicioSeleccionado.duracion;
+          console.log('🎯 Servicio seleccionado:', servicioSeleccionado.nombre, 'Duración:', duracionServicio, 'min');
+        }
+      }
+      
+      const maxDias = trabajador.limiteDiasReserva;
+      let diasBuscados = 0;
+      
+      console.log('🔍 Buscando disponibilidad:', {
+        trabajador: trabajador.nombre,
+        servicio: servicioSeleccionado?.nombre || 'Cualquiera',
+        duracion: duracionServicio,
+        desde: busquedaDisponibilidad.fechaDesde,
+        horaDesde: busquedaDisponibilidad.horaDesde
+      });
+      
+      for (let dia = 0; dia < maxDias && resultados.length < busquedaDisponibilidad.cantidadResultados && diasBuscados < 90; dia++) {
+        const fecha = new Date(fechaInicio);
+        fecha.setDate(fechaInicio.getDate() + dia);
+        const fechaStr = fecha.toISOString().split('T')[0];
+        
+        // ✅ NO BUSCAR EN FECHAS PASADAS
+        if (esFechaHoraPasada(fechaStr)) {
+          continue;
+        }
+        
+        diasBuscados++;
+        
+        const diaSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][fecha.getDay()];
+        const horarioDia = trabajador.horariosTrabajo[diaSemana];
+        
+        if (!horarioDia || !horarioDia.activo || trabajador.festivos.includes(fechaStr)) continue;
+        
+        // Buscar slots disponibles en las franjas del día
+        for (const franja of horarioDia.franjas || []) {
+          const [horaIni, minIni] = franja.inicio.split(':').map(Number);
+          const [horaFin, minFin] = franja.fin.split(':').map(Number);
+          
+          // ✅ BUSCAR EN INTERVALOS DE 15 MINUTOS para mayor precisión
+          for (let minutos = horaIni * 60 + minIni; minutos <= (horaFin * 60 + minFin) - duracionServicio; minutos += 15) {
+            const hora = Math.floor(minutos / 60);
+            const min = minutos % 60;
+            const horaStr = `${hora.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+            
+            // Verificar si es después de la hora mínima del primer día
+            if (dia === 0) {
+              const [horaMinima, minMinimo] = busquedaDisponibilidad.horaDesde.split(':').map(Number);
+              if (minutos < horaMinima * 60 + minMinimo) continue;
+            }
+            
+            // ✅ VERIFICAR DISPONIBILIDAD CON DURACIÓN EXACTA
+            if (estaDisponible(trabajadorId, fechaStr, horaStr, duracionServicio)) {
+              resultados.push({
+                fecha: fechaStr,
+                hora: horaStr,
+                trabajador: trabajador,
+                duracion: duracionServicio,
+                servicio: servicioSeleccionado,
+                fechaFormateada: fecha.toLocaleDateString('es-ES', { 
+                  weekday: 'long', 
+                  day: 'numeric', 
+                  month: 'long' 
+                })
+              });
+              
+              if (resultados.length >= busquedaDisponibilidad.cantidadResultados) break;
+            }
+          }
+          if (resultados.length >= busquedaDisponibilidad.cantidadResultados) break;
+        }
+        if (resultados.length >= busquedaDisponibilidad.cantidadResultados) break;
+      }
+      
+      console.log('✅ Resultados encontrados:', resultados.length);
+      setResultadosDisponibilidad(resultados);
+      
+      if (resultados.length === 0) {
+        showMessage('No se encontraron disponibilidades con los criterios seleccionados', 'error');
+      } else {
+        showMessage(`Se encontraron ${resultados.length} disponibilidades`, 'success');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error buscando disponibilidades:', error);
+      showMessage('Error al buscar disponibilidades', 'error');
+    } finally {
+      setBuscandoDisponibilidad(false);
+    }
+  };
+
   const navegarAFecha = useCallback((fecha) => {
     const inicioSemanaObjetivo = getInicioSemana(fecha);
     setFechaActual(inicioSemanaObjetivo);
@@ -422,25 +506,29 @@ export default function CargaTrabajoCorregida() {
     }
   }, [busqueda, reservas, trabajadorActivo, navegarAFecha]);
 
-  // ✅ FUNCIÓN CLAVE MEJORADA: Obtener reservas por día/hora considerando duración
   const getReservasPorDiaHora = (dia, hora) => {
-    const inicioSemana = getInicioSemana(fechaActual);
-    const diaIndice = diasSemana.indexOf(dia);
-    const fechaDia = new Date(inicioSemana);
-    fechaDia.setDate(inicioSemana.getDate() + diaIndice);
-    const fechaStr = fechaDia.toISOString().split('T')[0];
-    
     return reservasFiltradas.filter((r) => {
-      if (r.fecha !== fechaStr || r.trabajador !== trabajadorActivo || r.estado === 'cancelada') {
-        return false;
-      }
+      const fecha = new Date(r.fecha);
       
-      // ✅ VERIFICAR SI LA RESERVA OCUPA ESTE SLOT ESPECÍFICO
-      return reservaOcupaSlot(r, servicios, hora);
-    }).map(r => ({
-      ...r,
-      tipoOcupacion: getTipoOcupacionSlot(r, servicios, hora)
-    }));
+      const inicioSemana = getInicioSemana(fechaActual);
+      const diaIndice = diasSemana.indexOf(dia);
+      const fechaDia = new Date(inicioSemana);
+      fechaDia.setDate(inicioSemana.getDate() + diaIndice);
+      
+      const fechaReserva = fecha.toISOString().split('T')[0];
+      const fechaDiaStr = fechaDia.toISOString().split('T')[0];
+      
+      const [horaRes, minRes] = r.hora.split(':').map(Number);
+      const [horaSlot, minSlot] = hora.split(':').map(Number);
+      const minutosReserva = horaRes * 60 + minRes;
+      const minutosSlot = horaSlot * 60 + minSlot;
+      
+      return fechaReserva === fechaDiaStr && 
+             minutosReserva >= minutosSlot && 
+             minutosReserva < minutosSlot + 30 &&
+             r.trabajador === trabajadorActivo &&
+             r.estado !== 'cancelada';
+    });
   };
 
   const getBloqueosPorDiaHora = (dia, hora) => {
@@ -492,7 +580,7 @@ export default function CargaTrabajoCorregida() {
     return `${inicio.toLocaleDateString('es-ES', opciones)} - ${fin.toLocaleDateString('es-ES', opciones)}`;
   };
 
-  // Verificar si día no disponible O si es fecha pasada
+  // ✅ FUNCIÓN MEJORADA: Verificar si día no disponible O si es fecha pasada
   const esDiaNoDisponible = (dia) => {
     const trabajador = trabajadores.find(t => t.id === trabajadorActivo);
     if (!trabajador) return true;
@@ -503,7 +591,7 @@ export default function CargaTrabajoCorregida() {
     fechaDia.setDate(inicioSemana.getDate() + diaIndice);
     const fechaStr = fechaDia.toISOString().split('T')[0];
     
-    // Verificar si es fecha pasada
+    // ✅ VERIFICAR SI ES FECHA PASADA
     if (esFechaHoraPasada(fechaStr)) return true;
     
     const diaSemanaKey = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][fechaDia.getDay()];
@@ -512,7 +600,7 @@ export default function CargaTrabajoCorregida() {
     return !horarioDia || !horarioDia.activo || trabajador.festivos.includes(fechaStr);
   };
 
-  // ✅ FUNCIÓN MEJORADA: Verificar si slot específico es clickeable considerando extensiones
+  // ✅ FUNCIÓN MEJORADA: Verificar si slot específico es clickeable
   const esSlotClickeable = (dia, hora) => {
     const inicioSemana = getInicioSemana(fechaActual);
     const diaIndice = diasSemana.indexOf(dia);
@@ -520,19 +608,15 @@ export default function CargaTrabajoCorregida() {
     fechaDia.setDate(inicioSemana.getDate() + diaIndice);
     const fechaStr = fechaDia.toISOString().split('T')[0];
     
-    // NO CLICKEABLE SI ES FECHA/HORA PASADA
+    // ✅ NO CLICKEABLE SI ES FECHA/HORA PASADA
     if (esFechaHoraPasada(fechaStr, hora)) return false;
     
-    // NO CLICKEABLE SI EL DÍA NO ESTÁ DISPONIBLE
+    // ✅ NO CLICKEABLE SI EL DÍA NO ESTÁ DISPONIBLE
     if (esDiaNoDisponible(dia)) return false;
     
-    // NO CLICKEABLE SI HAY BLOQUEOS
+    // ✅ NO CLICKEABLE SI HAY BLOQUEOS
     const bloqueosEnSlot = getBloqueosPorDiaHora(dia, hora);
     if (bloqueosEnSlot.length > 0) return false;
-    
-    // ✅ NO CLICKEABLE SI HAY RESERVAS QUE OCUPAN ESTE SLOT
-    const reservasEnSlot = getReservasPorDiaHora(dia, hora);
-    if (reservasEnSlot.length > 0) return false;
     
     return true;
   };
@@ -544,7 +628,7 @@ export default function CargaTrabajoCorregida() {
     fecha.setDate(inicioSemana.getDate() + diaIndice);
     const iso = fecha.toISOString().split("T")[0];
     
-    // Validación: No abrir modal para fechas/horas pasadas
+    // ✅ VALIDACIÓN: No abrir modal para fechas/horas pasadas
     if (!reserva && esFechaHoraPasada(iso, hora)) {
       showMessage('No puedes crear reservas en fechas u horas pasadas', 'error');
       return;
@@ -577,6 +661,22 @@ export default function CargaTrabajoCorregida() {
     }
   };
 
+  const abrirModalBloqueo = (dia, hora) => {
+    const inicioSemana = getInicioSemana(fechaActual);
+    const diaIndice = diasSemana.indexOf(dia);
+    const fecha = new Date(inicioSemana);
+    fecha.setDate(inicioSemana.getDate() + diaIndice);
+    const iso = fecha.toISOString().split("T")[0];
+    
+    setBloqueoFormData({
+      fecha: iso,
+      horaInicio: hora,
+      horaFin: hora,
+      motivo: ''
+    });
+    setModalBloqueo(true);
+  };
+
   const guardarReserva = async () => {
     if (!user || !trabajadorActivo) {
       showMessage('Error: Usuario o trabajador no válido', 'error');
@@ -588,7 +688,7 @@ export default function CargaTrabajoCorregida() {
       return;
     }
 
-    // Validación: No permitir guardar reservas en fechas/horas pasadas
+    // ✅ VALIDACIÓN: No permitir guardar reservas en fechas/horas pasadas
     if (!modalData?.id && esFechaHoraPasada(modalData?.fecha, modalFormData.hora)) {
       showMessage('No puedes crear reservas en fechas u horas pasadas', 'error');
       return;
@@ -658,6 +758,48 @@ export default function CargaTrabajoCorregida() {
     }
   };
 
+  const guardarBloqueo = async () => {
+    if (!user || !trabajadorActivo) {
+      showMessage('Error: Usuario o trabajador no válido', 'error');
+      return;
+    }
+
+    try {
+      const nuevoBloqueo = {
+        trabajador: trabajadorActivo,
+        fecha: bloqueoFormData.fecha,
+        horaInicio: bloqueoFormData.horaInicio,
+        horaFin: bloqueoFormData.horaFin,
+        motivo: bloqueoFormData.motivo || 'Bloqueo manual',
+        user_id: user.id
+      };
+
+      const { error } = await supabase
+        .from('bloqueos')
+        .insert([nuevoBloqueo]);
+
+      if (error) {
+        setBloqueos([...bloqueos, { ...nuevoBloqueo, id: Date.now() }]);
+        showMessage('Bloqueo guardado temporalmente (crear tabla bloqueos en Supabase)', 'success');
+      } else {
+        await cargarBloqueos(user.id);
+        showMessage('Bloqueo guardado exitosamente', 'success');
+      }
+
+      setModalBloqueo(false);
+      setBloqueoFormData({
+        fecha: '',
+        horaInicio: '',
+        horaFin: '',
+        motivo: ''
+      });
+      
+    } catch (error) {
+      console.error('❌ Error guardando bloqueo:', error);
+      showMessage(`Error al guardar el bloqueo: ${error.message}`, 'error');
+    }
+  };
+
   const eliminarReserva = async (id) => {
     if (!user || !confirm('¿Estás seguro de que quieres eliminar esta reserva?')) return;
     
@@ -688,6 +830,7 @@ export default function CargaTrabajoCorregida() {
     const fechaDia = new Date(inicioSemana);
     fechaDia.setDate(inicioSemana.getDate() + diaIndice);
     
+    // ✅ INDICAR SI ES FECHA PASADA
     const esPasada = esFechaHoraPasada(fechaDia.toISOString().split('T')[0]);
     const texto = `${nombreDia} ${fechaDia.getDate()}`;
     
@@ -704,13 +847,15 @@ export default function CargaTrabajoCorregida() {
     );
   };
 
-  // ✅ FUNCIÓN: Calcular hora de fin basada en duración
-  const calcularHoraFin = (horaInicio, duracionMinutos) => {
-    const [hora, min] = horaInicio.split(':').map(Number);
-    const totalMinutos = hora * 60 + min + duracionMinutos;
-    const horaFin = Math.floor(totalMinutos / 60);
-    const minFin = totalMinutos % 60;
-    return `${horaFin.toString().padStart(2, '0')}:${minFin.toString().padStart(2, '0')}`;
+  const reservarDesdeDisponibilidad = (resultado) => {
+    navegarAFecha(new Date(resultado.fecha));
+    setModalDisponibilidad(false);
+    
+    setTimeout(() => {
+      const fechaObj = new Date(resultado.fecha);
+      const diaSemana = diasSemana[fechaObj.getDay() === 0 ? 6 : fechaObj.getDay() - 1];
+      abrirModal(diaSemana, resultado.hora);
+    }, 100);
   };
 
   if (isLoading) {
@@ -808,7 +953,7 @@ export default function CargaTrabajoCorregida() {
               </div>
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Agenda Semanal</h1>
-                <p className="text-gray-600 text-sm md:text-base">Gestión de citas con duración exacta</p>
+                <p className="text-gray-600 text-sm md:text-base">Gestión de citas y reservas</p>
                 {user && (
                   <p className="text-xs text-blue-600">Usuario: {user.email}</p>
                 )}
@@ -867,25 +1012,50 @@ export default function CargaTrabajoCorregida() {
               </button>
             </div>
 
-            {/* Buscador */}
-            <div className="relative min-w-0 flex-1 sm:w-auto sm:flex-none">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1 sm:w-48">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Buscar cliente..."
-                    value={busqueda}
-                    onChange={(e) => setBusqueda(e.target.value)}
-                    className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all w-full text-sm"
-                  />
+            {/* Buscador y herramientas */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <button
+                onClick={() => setModalDisponibilidad(true)}
+                className="flex items-center justify-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-medium"
+                title="Buscar disponibilidad"
+              >
+                <CalendarSearch className="w-4 h-4" />
+                <span className="hidden sm:inline">Disponibilidad</span>
+                <span className="sm:hidden">Buscar</span>
+              </button>
+
+              <div className="relative min-w-0 flex-1 sm:w-auto sm:flex-none">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 sm:w-48">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar cliente..."
+                      value={busqueda}
+                      onChange={(e) => setBusqueda(e.target.value)}
+                      className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all w-full text-sm"
+                    />
+                    {busqueda && (
+                      <button
+                        onClick={() => setBusqueda("")}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                   {busqueda && (
-                    <button
-                      onClick={() => setBusqueda("")}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {reservasFiltradas.filter(r => r.trabajador === trabajadorActivo).length > 0 ? (
+                        <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">
+                          {reservasFiltradas.filter(r => r.trabajador === trabajadorActivo).length} resultados
+                        </span>
+                      ) : (
+                        <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded whitespace-nowrap">
+                          Sin resultados
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -895,9 +1065,11 @@ export default function CargaTrabajoCorregida() {
           {getTrabajadorActivo() && (
             <div className="p-3 bg-blue-50 rounded-lg">
               <p className="text-xs md:text-sm text-blue-700">
-                <span className="font-semibold">{getTrabajadorActivo()?.nombre}</span> • 
-                Descanso: {getTrabajadorActivo()?.tiempoDescanso}min • 
-                Reserva máx: {getTrabajadorActivo()?.limiteDiasReserva} días
+                Mostrando agenda de: <span className="font-semibold">{getTrabajadorActivo()?.nombre}</span>
+                <span className="ml-4 text-xs">
+                  Descanso: {getTrabajadorActivo()?.tiempoDescanso}min • 
+                  Reserva máx: {getTrabajadorActivo()?.limiteDiasReserva} días
+                </span>
               </p>
             </div>
           )}
@@ -940,17 +1112,15 @@ export default function CargaTrabajoCorregida() {
                     const hayBloqueo = bloqueosEnSlot.length > 0;
                     const esClickeable = esSlotClickeable(dia, hora);
                     
-                    // Determinar color y estado del slot
+                    // ✅ DETERMINAR COLOR Y ESTADO DEL SLOT
                     let claseSlot = 'border-t border-l border-gray-200 p-2 min-h-16 transition-colors group relative overflow-hidden ';
                     
                     if (noDisponible) {
                       claseSlot += 'bg-red-50 cursor-not-allowed';
                     } else if (hayBloqueo) {
                       claseSlot += 'bg-orange-50 cursor-not-allowed';
-                    } else if (!esClickeable && reservasEnSlot.length === 0) {
+                    } else if (!esClickeable) {
                       claseSlot += 'bg-gray-100 cursor-not-allowed opacity-50';
-                    } else if (reservasEnSlot.length > 0) {
-                      claseSlot += 'bg-blue-25 cursor-pointer';
                     } else {
                       claseSlot += 'bg-white hover:bg-blue-25 cursor-pointer';
                     }
@@ -959,23 +1129,33 @@ export default function CargaTrabajoCorregida() {
                       <div
                         key={dia + hora}
                         className={claseSlot}
-                        onClick={() => {
-                          if (esClickeable) {
-                            abrirModal(dia, hora);
-                          } else if (reservasEnSlot.length > 0 && reservasEnSlot[0].tipoOcupacion === 'principal') {
-                            abrirModal(dia, hora, reservasEnSlot[0]);
-                          }
+                        onClick={() => esClickeable && abrirModal(dia, hora)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          if (esClickeable) abrirModalBloqueo(dia, hora);
                         }}
-                        title={
-                          !esClickeable && reservasEnSlot.length === 0 ? 'Hora no disponible' : 
-                          reservasEnSlot.length > 0 ? 'Click para ver/editar reserva' :
-                          'Click para crear reserva'
-                        }
+                        title={!esClickeable ? 'Hora no disponible' : 'Click para crear reserva, click derecho para bloquear'}
                       >
                         {/* Add button on hover para slots clickeables */}
-                        {esClickeable && reservasEnSlot.length === 0 && (
+                        {esClickeable && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-blue-50">
                             <Plus className="w-6 h-6 text-blue-400" />
+                          </div>
+                        )}
+
+                        {/* Block button para slots válidos */}
+                        {esClickeable && (
+                          <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                abrirModalBloqueo(dia, hora);
+                              }}
+                              className="p-1 rounded bg-orange-100 text-orange-600 hover:bg-orange-200"
+                              title="Bloquear horario"
+                            >
+                              <Ban className="w-3 h-3" />
+                            </button>
                           </div>
                         )}
                         
@@ -999,104 +1179,77 @@ export default function CargaTrabajoCorregida() {
                           </div>
                         ))}
 
-                        {/* ✅ RESERVAS MEJORADAS: Solo mostrar en slot principal, indicar extensión */}
+                        {/* Reservas existentes */}
                         <div className="relative z-10 space-y-1">
                           {reservasEnSlot.map((r) => {
                             const esResaltada = esReservaResaltada(r);
                             const servicio = servicios.find(s => s.id === r.servicio_id);
-                            const duracionServicio = servicio ? servicio.duracion : 30;
-                            const horaFin = calcularHoraFin(r.hora, duracionServicio);
                             
-                            // ✅ MOSTRAR RESERVA COMPLETA SOLO EN SLOT PRINCIPAL
-                            if (r.tipoOcupacion === 'principal') {
-                              return (
-                                <div 
-                                  key={r.id} 
-                                  className={`border rounded-lg p-2 shadow-sm hover:shadow-md transition-all ${
-                                    esResaltada 
-                                      ? 'bg-gradient-to-r from-yellow-100 to-yellow-200 border-yellow-300 ring-2 ring-yellow-400 ring-opacity-50' 
-                                      : r.estado === 'confirmada'
-                                        ? 'bg-gradient-to-r from-blue-100 to-indigo-100 border-blue-200'
-                                        : 'bg-gradient-to-r from-gray-100 to-gray-200 border-gray-300'
-                                  }`}
-                                >
-                                  <div className="flex justify-between items-start gap-1">
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-1 mb-1">
-                                        <User className={`w-3 h-3 flex-shrink-0 ${esResaltada ? 'text-yellow-700' : 'text-blue-600'}`} />
-                                        <p className={`font-semibold text-xs truncate ${esResaltada ? 'text-yellow-800' : 'text-gray-800'}`} title={r.cliente?.nombre}>
-                                          {r.cliente?.nombre}
-                                        </p>
-                                      </div>
-                                      <div className="space-y-0.5">
-                                        {r.cliente?.telefono && (
-                                          <div className="flex items-center gap-1 text-xs text-gray-600">
-                                            <Phone className="w-2.5 h-2.5 flex-shrink-0" />
-                                            <span className="truncate" title={r.cliente?.telefono}>{r.cliente?.telefono}</span>
-                                          </div>
-                                        )}
-                                        <div className={`flex items-center gap-1 text-xs font-medium ${esResaltada ? 'text-yellow-700' : 'text-blue-700'}`}>
-                                          <Clock className="w-2.5 h-2.5 flex-shrink-0" />
-                                          <span>{r.hora} - {horaFin}</span>
-                                          {servicio && (
-                                            <span className="text-xs text-gray-500">({servicio.duracion}min)</span>
-                                          )}
+                            return (
+                              <div 
+                                key={r.id} 
+                                className={`border rounded-lg p-2 shadow-sm hover:shadow-md transition-all ${
+                                  esResaltada 
+                                    ? 'bg-gradient-to-r from-yellow-100 to-yellow-200 border-yellow-300 ring-2 ring-yellow-400 ring-opacity-50' 
+                                    : r.estado === 'confirmada'
+                                      ? 'bg-gradient-to-r from-blue-100 to-indigo-100 border-blue-200'
+                                      : 'bg-gradient-to-r from-gray-100 to-gray-200 border-gray-300'
+                                }`}
+                              >
+                                <div className="flex justify-between items-start gap-1">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1 mb-1">
+                                      <User className={`w-3 h-3 flex-shrink-0 ${esResaltada ? 'text-yellow-700' : 'text-blue-600'}`} />
+                                      <p className={`font-semibold text-xs truncate ${esResaltada ? 'text-yellow-800' : 'text-gray-800'}`} title={r.cliente?.nombre}>
+                                        {r.cliente?.nombre}
+                                      </p>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      {r.cliente?.telefono && (
+                                        <div className="flex items-center gap-1 text-xs text-gray-600">
+                                          <Phone className="w-2.5 h-2.5 flex-shrink-0" />
+                                          <span className="truncate" title={r.cliente?.telefono}>{r.cliente?.telefono}</span>
                                         </div>
+                                      )}
+                                      <div className={`flex items-center gap-1 text-xs font-medium ${esResaltada ? 'text-yellow-700' : 'text-blue-700'}`}>
+                                        <Clock className="w-2.5 h-2.5 flex-shrink-0" />
+                                        <span>{r.hora}</span>
                                         {servicio && (
-                                          <div className="text-xs text-gray-600 font-medium">
-                                            {servicio.nombre}
-                                          </div>
+                                          <span className="text-xs text-gray-500">({servicio.duracion}min)</span>
                                         )}
                                       </div>
                                     </div>
-                                    
-                                    <div className="flex flex-col gap-0.5 ml-1 flex-shrink-0">
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          abrirModal(dia, hora, r);
-                                        }}
-                                        className="p-1 rounded hover:bg-yellow-100 text-yellow-600 transition-colors"
-                                        title="Editar reserva"
-                                      >
-                                        <Edit2 className="w-3 h-3" />
-                                      </button>
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          eliminarReserva(r.id);
-                                        }}
-                                        className="p-1 rounded hover:bg-red-100 text-red-500 transition-colors"
-                                        title="Eliminar reserva"
-                                      >
-                                        <Trash2 className="w-3 h-3" />
-                                      </button>
-                                    </div>
+                                  </div>
+                                  
+                                  <div className="flex flex-col gap-0.5 ml-1 flex-shrink-0">
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        abrirModal(dia, hora, r);
+                                      }}
+                                      className="p-1 rounded hover:bg-yellow-100 text-yellow-600 transition-colors"
+                                      title="Editar reserva"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        eliminarReserva(r.id);
+                                      }}
+                                      className="p-1 rounded hover:bg-red-100 text-red-500 transition-colors"
+                                      title="Eliminar reserva"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
                                   </div>
                                 </div>
-                              );
-                            } else {
-                              // ✅ MOSTRAR INDICADOR DE EXTENSIÓN EN SLOTS OCUPADOS
-                              return (
-                                <div 
-                                  key={`ext-${r.id}`}
-                                  className="bg-blue-100 border-2 border-blue-300 border-dashed rounded p-2 opacity-75"
-                                  title={`Continuación de: ${r.cliente?.nombre} (${r.hora} - ${horaFin})`}
-                                >
-                                  <div className="flex items-center justify-center">
-                                    <div className="text-xs text-blue-700 font-medium text-center">
-                                      <Clock className="w-3 h-3 mx-auto mb-1" />
-                                      <div>Ocupado</div>
-                                      <div className="text-xs opacity-75">{r.cliente?.nombre}</div>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            }
+                              </div>
+                            );
                           })}
                         </div>
                         
-                        {/* Indicadores de estado para slots vacíos */}
+                        {/* Indicadores de estado */}
                         {!esClickeable && reservasEnSlot.length === 0 && bloqueosEnSlot.length === 0 && (
                           <div className="absolute inset-0 flex items-center justify-center">
                             <div className="text-gray-400 text-xs font-medium">
@@ -1113,7 +1266,7 @@ export default function CargaTrabajoCorregida() {
           </div>
         </div>
 
-        {/* Mobile Calendar - Simplificado */}
+        {/* Mobile Calendar */}
         <div className="md:hidden space-y-4">
           {diasSemana.map((dia) => {
             const inicioSemana = getInicioSemana(fechaActual);
@@ -1149,8 +1302,6 @@ export default function CargaTrabajoCorregida() {
                         .map((r) => {
                           const esResaltada = esReservaResaltada(r);
                           const servicio = servicios.find(s => s.id === r.servicio_id);
-                          const duracionServicio = servicio ? servicio.duracion : 30;
-                          const horaFin = calcularHoraFin(r.hora, duracionServicio);
                           
                           return (
                             <div 
@@ -1170,12 +1321,10 @@ export default function CargaTrabajoCorregida() {
                                   </div>
                                   <div>
                                     <span className={`font-bold text-lg ${esResaltada ? 'text-yellow-800' : 'text-blue-800'}`}>
-                                      {r.hora} - {horaFin}
+                                      {r.hora}
                                     </span>
                                     {servicio && (
-                                      <div className="text-sm text-gray-600">
-                                        {servicio.nombre} ({servicio.duracion} min)
-                                      </div>
+                                      <span className="text-sm text-gray-600 ml-2">({servicio.duracion} min)</span>
                                     )}
                                   </div>
                                 </div>
@@ -1219,6 +1368,13 @@ export default function CargaTrabajoCorregida() {
                                     <a href={`mailto:${r.cliente?.email}`} className="text-gray-700 hover:text-blue-600 transition-colors text-sm">
                                       {r.cliente?.email}
                                     </a>
+                                  </div>
+                                )}
+
+                                {servicio && (
+                                  <div className="flex items-center gap-3">
+                                    <Clock className="w-4 h-4 text-gray-500" />
+                                    <span className="text-gray-700 text-sm">{servicio.nombre}</span>
                                   </div>
                                 )}
 
@@ -1337,7 +1493,7 @@ export default function CargaTrabajoCorregida() {
                     <option value="">Selecciona una hora</option>
                     {horasFormulario
                       .filter(hora => {
-                        // Filtrar horas pasadas en el selector
+                        // ✅ FILTRAR HORAS PASADAS EN EL SELECTOR
                         if (modalData?.id) return true; // Si es edición, permitir cualquier hora
                         return !esFechaHoraPasada(modalData?.fecha, hora);
                       })
@@ -1388,6 +1544,314 @@ export default function CargaTrabajoCorregida() {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Bloqueo */}
+      {modalBloqueo && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-r from-orange-500 to-red-500 p-2 rounded-full">
+                  <Ban className="w-5 h-5 text-white" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-800">
+                  Bloquear Horario
+                </h2>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Fecha
+                  </label>
+                  <input 
+                    type="date"
+                    value={bloqueoFormData.fecha}
+                    onChange={(e) => setBloqueoFormData(prev => ({ ...prev, fecha: e.target.value }))}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Hora inicio
+                    </label>
+                    <select 
+                      value={bloqueoFormData.horaInicio}
+                      onChange={(e) => setBloqueoFormData(prev => ({ ...prev, horaInicio: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                    >
+                      {horasFormulario.map((hora) => (
+                        <option key={hora} value={hora}>{hora}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Hora fin
+                    </label>
+                    <select 
+                      value={bloqueoFormData.horaFin}
+                      onChange={(e) => setBloqueoFormData(prev => ({ ...prev, horaFin: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                    >
+                      {horasFormulario.map((hora) => (
+                        <option key={hora} value={hora}>{hora}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Motivo (opcional)
+                  </label>
+                  <input 
+                    value={bloqueoFormData.motivo}
+                    onChange={(e) => setBloqueoFormData(prev => ({ ...prev, motivo: e.target.value }))}
+                    placeholder="Motivo del bloqueo"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-3 mt-8">
+                <button 
+                  type="button" 
+                  onClick={() => setModalBloqueo(false)} 
+                  className="px-6 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  onClick={guardarBloqueo}
+                  className="px-6 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white font-medium rounded-lg hover:from-orange-600 hover:to-red-600 transition-all shadow-lg hover:shadow-xl"
+                >
+                  Bloquear Horario
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Búsqueda de Disponibilidad - MEJORADO */}
+      {modalDisponibilidad && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 sm:p-4 z-50">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col">
+            <div className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-2 rounded-full">
+                    <CalendarSearch className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-800">
+                    Buscar Disponibilidad
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setModalDisponibilidad(false)}
+                  className="text-gray-400 hover:text-gray-600 p-2"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="bg-gray-50 rounded-xl p-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Desde fecha
+                    </label>
+                    <input
+                      type="date"
+                      value={busquedaDisponibilidad.fechaDesde}
+                      onChange={(e) => setBusquedaDisponibilidad(prev => ({
+                        ...prev,
+                        fechaDesde: e.target.value
+                      }))}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Desde hora
+                    </label>
+                    <select
+                      value={busquedaDisponibilidad.horaDesde}
+                      onChange={(e) => setBusquedaDisponibilidad(prev => ({
+                        ...prev,
+                        horaDesde: e.target.value
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                    >
+                      {horasFormulario.map(hora => (
+                        <option key={hora} value={hora}>{hora}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Servicio (opcional)
+                    </label>
+                    <select
+                      value={busquedaDisponibilidad.servicio}
+                      onChange={(e) => setBusquedaDisponibilidad(prev => ({
+                        ...prev,
+                        servicio: e.target.value
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                    >
+                      <option value="">Cualquier servicio</option>
+                      {/* ✅ MOSTRAR SOLO SERVICIOS DEL USUARIO ACTUAL */}
+                      {servicios.map(servicio => (
+                        <option key={servicio.id} value={servicio.id}>
+                          {servicio.nombre} ({servicio.duracion}min)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Trabajador
+                    </label>
+                    <select
+                      value={busquedaDisponibilidad.trabajador}
+                      onChange={(e) => setBusquedaDisponibilidad(prev => ({
+                        ...prev,
+                        trabajador: e.target.value
+                      }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                    >
+                      <option value="">Trabajador actual</option>
+                      {trabajadores.map(trabajador => (
+                        <option key={trabajador.id} value={trabajador.id}>
+                          {trabajador.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Cantidad de resultados
+                    </label>
+                    <select
+                      value={busquedaDisponibilidad.cantidadResultados}
+                      onChange={(e) => setBusquedaDisponibilidad(prev => ({
+                        ...prev,
+                        cantidadResultados: parseInt(e.target.value)
+                      }))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                    >
+                      <option value={5}>5 resultados</option>
+                      <option value={10}>10 resultados</option>
+                      <option value={20}>20 resultados</option>
+                      <option value={50}>50 resultados</option>
+                    </select>
+                  </div>
+                  
+                  <div className="w-full sm:w-auto">
+                    <button
+                      onClick={buscarProximasDisponibilidades}
+                      disabled={buscandoDisponibilidad}
+                      className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    >
+                      {buscandoDisponibilidad ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Buscando...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4" />
+                          Buscar Disponibilidad
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {resultadosDisponibilidad.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-gray-800 mb-4">
+                    Próximas disponibilidades ({resultadosDisponibilidad.length} encontradas)
+                  </h3>
+                  
+                  <div className="grid gap-3">
+                    {resultadosDisponibilidad.map((resultado, index) => (
+                      <div key={index} className="bg-green-50 border border-green-200 rounded-lg p-4 hover:bg-green-100 transition-colors">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-5 h-5 text-green-600 flex-shrink-0" />
+                                <span className="font-semibold text-gray-800 text-sm sm:text-base">
+                                  {resultado.fechaFormateada}
+                                </span>
+                              </div>
+                              <span className="text-green-700 font-medium text-lg">
+                                {resultado.hora}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                              <div className="flex items-center gap-1">
+                                <User className="w-4 h-4" />
+                                <span>{resultado.trabajador.nombre}</span>
+                              </div>
+                              {resultado.servicio && (
+                                <div className="flex items-center gap-1">
+                                  <Clock className="w-4 h-4" />
+                                  <span>{resultado.servicio.nombre} ({resultado.duracion} min)</span>
+                                </div>
+                              )}
+                              {!resultado.servicio && resultado.duracion !== 30 && (
+                                <div className="flex items-center gap-1">
+                                  <Clock className="w-4 h-4" />
+                                  <span>{resultado.duracion} min</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => reservarDesdeDisponibilidad(resultado)}
+                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium text-sm"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Reservar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {resultadosDisponibilidad.length === 0 && !buscandoDisponibilidad && (
+                <div className="text-center py-8">
+                  <CalendarSearch className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">
+                    Haz clic en "Buscar Disponibilidad" para encontrar los próximos horarios libres
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
