@@ -1,72 +1,21 @@
 import { useEffect, useState, useCallback } from "react";
-import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, Eye, EyeOff, AlertCircle, Euro, Link, Copy, ExternalLink, CheckCircle } from "lucide-react";
+import { Settings, User, Clock, Calendar, Shield, Trash2, Plus, Save, ChevronDown, ChevronUp, AlertCircle, Euro, Link, Copy, ExternalLink, CheckCircle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useRouter } from "next/router";
 
-interface Servicio {
-  id: number;
-  nombre: string;
-  duracion: number;
-  precio: number;
-  mostrarPrecio: boolean;
-  user_id?: string;
-}
-
-interface Trabajador {
-  id: string;
-  nombre: string;
-  servicios: Servicio[];
-  festivos: string[];
-  limiteDiasReserva: number;
-  user_id?: string;
-}
-
-interface NuevoServicio {
-  nombre: string;
-  duracion: number;
-  precio: number;
-  mostrarPrecio: boolean;
-}
-
-interface User {
-  id: string;
-  email?: string;
-}
-
-interface TrabajadorData {
-  id: string;
-  nombre: string;
-  servicios: number[];
-  festivos: string[];
-  duracionCitaDefecto: number;
-  user_id: string;
-}
-
-interface ConfiguracionNegocio {
-  id: number;
-  user_id: string;
-  nombre_negocio: string;
-  slug: string;
-  descripcion: string;
-  telefono_contacto: string;
-  direccion: string;
-  horario_atencion: string;
-  dias_reserva_max: number;
-}
-
 export default function Configuracion() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
-  const [serviciosGlobales, setServiciosGlobales] = useState<Servicio[]>([]);
-  const [configuracionNegocio, setConfiguracionNegocio] = useState<ConfiguracionNegocio | null>(null);
-  const [nuevoTrabajador, setNuevoTrabajador] = useState<string>("");
-  const [trabajadorExpandido, setTrabajadorExpandido] = useState<string | null>(null);
-  const [seccionActiva, setSeccionActiva] = useState<string>("negocio");
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [message, setMessage] = useState<string>("");
-  const [nuevosServicios, setNuevosServicios] = useState<Record<string, NuevoServicio>>({});
-  const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState<Record<string, string>>({});
+  const [user, setUser] = useState(null);
+  const [trabajadores, setTrabajadores] = useState([]);
+  const [serviciosGlobales, setServiciosGlobales] = useState([]);
+  const [configuracionNegocio, setConfiguracionNegocio] = useState(null);
+  const [nuevoTrabajador, setNuevoTrabajador] = useState("");
+  const [trabajadorExpandido, setTrabajadorExpandido] = useState(null);
+  const [seccionActiva, setSeccionActiva] = useState("negocio");
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [nuevosServicios, setNuevosServicios] = useState({});
+  const [nuevasFechasFestivas, setNuevasFechasFestivas] = useState({});
   
   // Estados para configuración del negocio
   const [datosNegocio, setDatosNegocio] = useState({
@@ -78,18 +27,20 @@ export default function Configuracion() {
     horario_atencion: '',
     dias_reserva_max: 30
   });
-  const [slugDisponible, setSlugDisponible] = useState<boolean | null>(null);
+  const [slugDisponible, setSlugDisponible] = useState(null);
   const [verificandoSlug, setVerificandoSlug] = useState(false);
   const [urlCopiada, setUrlCopiada] = useState(false);
 
-  const showMessage = (msg: string) => {
+  const showMessage = (msg) => {
     setMessage(msg);
     setTimeout(() => setMessage(""), 3000);
   };
 
-  const cargarDatos = useCallback(async (userId: string) => {
+  const cargarDatos = useCallback(async (userId) => {
     setIsLoading(true);
     try {
+      console.log('🔄 Cargando datos para usuario:', userId);
+
       // ✅ CARGAR CONFIGURACIÓN DEL NEGOCIO
       const { data: config, error: errorConfig } = await supabase
         .from('configuracion')
@@ -100,6 +51,7 @@ export default function Configuracion() {
       if (errorConfig && errorConfig.code !== 'PGRST116') {
         console.error('Error cargando configuración:', errorConfig);
       } else if (config) {
+        console.log('✅ Configuración cargada:', config);
         setConfiguracionNegocio(config);
         setDatosNegocio({
           nombre_negocio: config.nombre_negocio || '',
@@ -118,7 +70,11 @@ export default function Configuracion() {
         .select('*')
         .eq('user_id', userId);
 
-      if (errorServicios) throw errorServicios;
+      if (errorServicios) {
+        console.error('Error cargando servicios:', errorServicios);
+        throw errorServicios;
+      }
+      console.log('✅ Servicios cargados:', servicios?.length || 0);
       setServiciosGlobales(servicios || []);
 
       // Cargar trabajadores
@@ -127,14 +83,19 @@ export default function Configuracion() {
         .select('*')
         .eq('user_id', userId);
 
-      if (errorTrabajadores) throw errorTrabajadores;
+      if (errorTrabajadores) {
+        console.error('Error cargando trabajadores:', errorTrabajadores);
+        throw errorTrabajadores;
+      }
+
+      console.log('✅ Trabajadores cargados:', trabajadoresData?.length || 0);
 
       // Procesar trabajadores con sus servicios
-      const trabajadoresProcesados = (trabajadoresData || []).map((t: TrabajadorData) => ({
+      const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
         id: t.id,
         nombre: t.nombre,
         servicios: t.servicios ? 
-          t.servicios.map((sId: number) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
+          t.servicios.map((sId) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
           : [],
         festivos: t.festivos || [],
         limiteDiasReserva: t.duracionCitaDefecto || 30,
@@ -144,14 +105,14 @@ export default function Configuracion() {
       setTrabajadores(trabajadoresProcesados);
       
       // Inicializar estados para cada trabajador
-      trabajadoresProcesados.forEach((t: Trabajador) => inicializarEstadosTrabajador(t.id));
+      trabajadoresProcesados.forEach((t) => inicializarEstadosTrabajador(t.id));
       
       if (trabajadoresProcesados.length > 0 && !trabajadorExpandido) {
         setTrabajadorExpandido(trabajadoresProcesados[0].id);
       }
 
     } catch (error) {
-      console.error('Error cargando datos:', error);
+      console.error('❌ Error cargando datos:', error);
       showMessage('Error cargando configuración');
     } finally {
       setIsLoading(false);
@@ -181,7 +142,10 @@ export default function Configuracion() {
   // ✅ FUNCIÓN: Generar slug automáticamente desde el nombre
   const generarSlugDesdeNombre = () => {
     const nombre = datosNegocio.nombre_negocio.trim();
-    if (!nombre) return;
+    if (!nombre) {
+      showMessage('Primero escribe el nombre del negocio');
+      return;
+    }
     
     const slugGenerado = nombre
       .toLowerCase()
@@ -199,7 +163,7 @@ export default function Configuracion() {
   };
 
   // ✅ FUNCIÓN: Verificar si el slug está disponible
-  const verificarSlugDisponible = async (slug: string) => {
+  const verificarSlugDisponible = async (slug) => {
     if (!slug || slug.length < 3) {
       setSlugDisponible(null);
       return;
@@ -234,7 +198,10 @@ export default function Configuracion() {
 
   // ✅ FUNCIÓN: Guardar configuración del negocio
   const guardarConfiguracionNegocio = async () => {
-    if (!user) return;
+    if (!user) {
+      showMessage('Error: Usuario no autenticado');
+      return;
+    }
     
     if (!datosNegocio.nombre_negocio.trim()) {
       showMessage('El nombre del negocio es requerido');
@@ -259,6 +226,8 @@ export default function Configuracion() {
         user_id: user.id
       };
       
+      console.log('💾 Guardando configuración:', datosActualizados);
+      
       if (configuracionNegocio) {
         // Actualizar configuración existente
         const { error } = await supabase
@@ -277,12 +246,12 @@ export default function Configuracion() {
         if (error) throw error;
       }
       
-      showMessage('Configuración guardada exitosamente');
+      showMessage('✅ Configuración guardada exitosamente');
       await cargarDatos(user.id);
       
     } catch (error) {
-      console.error('Error guardando configuración:', error);
-      showMessage('Error al guardar la configuración');
+      console.error('❌ Error guardando configuración:', error);
+      showMessage(`Error al guardar: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -297,6 +266,7 @@ export default function Configuracion() {
     try {
       await navigator.clipboard.writeText(urlPublica);
       setUrlCopiada(true);
+      showMessage('✅ URL copiada al portapapeles');
       setTimeout(() => setUrlCopiada(false), 2000);
     } catch (error) {
       console.error('Error copiando URL:', error);
@@ -312,7 +282,7 @@ export default function Configuracion() {
     window.open(urlPublica, '_blank');
   };
 
-  const inicializarEstadosTrabajador = (trabajadorId: string) => {
+  const inicializarEstadosTrabajador = (trabajadorId) => {
     setNuevosServicios(prev => ({
       ...prev,
       [trabajadorId]: prev[trabajadorId] || { nombre: "", duracion: 30, precio: 0, mostrarPrecio: true }
@@ -362,15 +332,15 @@ export default function Configuracion() {
       setNuevoTrabajador("");
       setTrabajadorExpandido(data.id);
       inicializarEstadosTrabajador(data.id);
-      showMessage("Trabajador agregado exitosamente");
+      showMessage("✅ Trabajador agregado exitosamente");
 
-    } catch (error: any) {
+    } catch (error) {
       console.error('❌ Error completo:', error);
       showMessage(`Error: ${error.message || 'Error desconocido'}`);
     }
   };
 
-  const eliminarTrabajador = async (id: string) => {
+  const eliminarTrabajador = async (id) => {
     if (!user || !confirm('¿Estás seguro de que quieres eliminar este trabajador?')) return;
     
     try {
@@ -388,15 +358,14 @@ export default function Configuracion() {
       if (trabajadorExpandido === id) {
         setTrabajadorExpandido(trabajadoresRestantes[0]?.id || null);
       }
-      showMessage("Trabajador eliminado");
+      showMessage("✅ Trabajador eliminado");
     } catch (error) {
       console.error('Error eliminando trabajador:', error);
       showMessage("Error eliminando trabajador");
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Agregar servicio
-  const agregarServicio = async (trabajadorId: string) => {
+  const agregarServicio = async (trabajadorId) => {
     const nuevoServicio = nuevosServicios[trabajadorId];
     if (!nuevoServicio || !nuevoServicio.nombre.trim() || !user) return;
 
@@ -447,15 +416,14 @@ export default function Configuracion() {
         [trabajadorId]: { nombre: "", duracion: 30, precio: 0, mostrarPrecio: true }
       }));
 
-      showMessage("Servicio agregado exitosamente");
+      showMessage("✅ Servicio agregado exitosamente");
     } catch (error) {
       console.error('Error agregando servicio:', error);
       showMessage("Error agregando servicio");
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Eliminar servicio
-  const eliminarServicio = async (trabajadorId: string, servicioId: number) => {
+  const eliminarServicio = async (trabajadorId, servicioId) => {
     if (!user || !confirm('¿Estás seguro de que quieres quitar este servicio del trabajador?')) return;
     
     try {
@@ -480,15 +448,14 @@ export default function Configuracion() {
         return t;
       }));
       
-      showMessage("Servicio eliminado del trabajador");
+      showMessage("✅ Servicio eliminado del trabajador");
     } catch (error) {
       console.error('Error eliminando servicio:', error);
       showMessage("Error eliminando servicio");
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Agregar festivo
-  const agregarFestivo = async (trabajadorId: string) => {
+  const agregarFestivo = async (trabajadorId) => {
     const nuevaFecha = nuevasFechasFestivas[trabajadorId];
     if (!nuevaFecha || !user) return;
     
@@ -523,15 +490,14 @@ export default function Configuracion() {
         [trabajadorId]: ""
       }));
       
-      showMessage("Día festivo agregado");
+      showMessage("✅ Día festivo agregado");
     } catch (error) {
       console.error('Error agregando festivo:', error);
       showMessage("Error agregando día festivo");
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Eliminar festivo
-  const eliminarFestivo = async (trabajadorId: string, fecha: string) => {
+  const eliminarFestivo = async (trabajadorId, fecha) => {
     if (!user || !confirm('¿Estás seguro de que quieres quitar este día festivo?')) return;
     
     try {
@@ -555,14 +521,14 @@ export default function Configuracion() {
         return t;
       }));
       
-      showMessage("Día festivo eliminado");
+      showMessage("✅ Día festivo eliminado");
     } catch (error) {
       console.error('Error eliminando festivo:', error);
       showMessage("Error eliminando día festivo");
     }
   };
 
-  const formatearFecha = (fecha: string): string => {
+  const formatearFecha = (fecha) => {
     return new Date(fecha).toLocaleDateString('es-ES', {
       day: 'numeric',
       month: 'long',
@@ -570,14 +536,14 @@ export default function Configuracion() {
     });
   };
 
-  const toggleTrabajador = (id: string) => {
+  const toggleTrabajador = (id) => {
     setTrabajadorExpandido(trabajadorExpandido === id ? null : id);
   };
 
   // Debounce para verificación de slug
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (datosNegocio.slug) {
+      if (datosNegocio.slug && datosNegocio.slug.length >= 3) {
         verificarSlugDisponible(datosNegocio.slug);
       }
     }, 500);
@@ -648,7 +614,7 @@ export default function Configuracion() {
             </div>
           </div>
 
-          {/* ✅ NUEVA: Navegación por secciones */}
+          {/* ✅ Navegación por secciones */}
           <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid #e5e7eb', paddingBottom: '1rem' }}>
             <button
               onClick={() => setSeccionActiva('negocio')}
@@ -663,7 +629,7 @@ export default function Configuracion() {
                 transition: 'all 0.3s ease'
               }}
             >
-              Información del Negocio
+              🏢 Información del Negocio
             </button>
             <button
               onClick={() => setSeccionActiva('trabajadores')}
@@ -678,7 +644,7 @@ export default function Configuracion() {
                 transition: 'all 0.3s ease'
               }}
             >
-              Trabajadores y Servicios
+              👥 Trabajadores y Servicios
             </button>
           </div>
         </div>
@@ -689,7 +655,7 @@ export default function Configuracion() {
             position: 'fixed',
             top: '1rem',
             right: '1rem',
-            background: message.includes('Error') ? '#ef4444' : '#10b981',
+            background: message.includes('Error') || message.includes('❌') ? '#ef4444' : '#10b981',
             color: 'white',
             padding: '0.75rem 1rem',
             borderRadius: '0.75rem',
@@ -703,7 +669,7 @@ export default function Configuracion() {
           </div>
         )}
 
-        {/* ✅ NUEVA SECCIÓN: Configuración del Negocio */}
+        {/* ✅ SECCIÓN: Configuración del Negocio */}
         {seccionActiva === 'negocio' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Información Básica */}
@@ -801,7 +767,7 @@ export default function Configuracion() {
               </div>
             </div>
 
-            {/* ✅ NUEVA: Configuración de URL Pública */}
+            {/* ✅ Configuración de URL Pública */}
             <div className="card">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
                 <Link size={20} style={{ color: '#10b981' }} />
@@ -874,7 +840,7 @@ export default function Configuracion() {
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      Auto-generar
+                      🔄 Auto-generar
                     </button>
                   </div>
 
@@ -890,7 +856,7 @@ export default function Configuracion() {
                       {slugDisponible === false && (
                         <div style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <AlertCircle size={16} />
-                          ❌ Ya está en uso
+                          ❌ Ya está en uso - prueba otro
                         </div>
                       )}
                     </div>
@@ -907,7 +873,7 @@ export default function Configuracion() {
                     marginTop: '1rem'
                   }}>
                     <h4 style={{ fontSize: '0.875rem', fontWeight: '600', color: '#15803d', margin: '0 0 0.5rem 0' }}>
-                      Tu URL pública será:
+                      🌐 Tu URL pública será:
                     </h4>
                     
                     <div style={{ 
@@ -922,7 +888,7 @@ export default function Configuracion() {
                       fontFamily: 'monospace',
                       flexWrap: 'wrap'
                     }}>
-                      <span style={{ color: '#16a34a' }}>
+                      <span style={{ color: '#16a34a', wordBreak: 'break-all' }}>
                         {typeof window !== 'undefined' ? window.location.origin : 'https://tudominio.com'}/reservas/{datosNegocio.slug}
                       </span>
                       
@@ -930,7 +896,7 @@ export default function Configuracion() {
                         <button
                           onClick={copiarUrlPublica}
                           style={{
-                            padding: '0.25rem',
+                            padding: '0.5rem',
                             background: urlCopiada ? '#10b981' : '#16a34a',
                             border: 'none',
                             borderRadius: '0.25rem',
@@ -948,7 +914,7 @@ export default function Configuracion() {
                         <button
                           onClick={abrirUrlPublica}
                           style={{
-                            padding: '0.25rem',
+                            padding: '0.5rem',
                             background: '#16a34a',
                             border: 'none',
                             borderRadius: '0.25rem',
@@ -966,7 +932,7 @@ export default function Configuracion() {
                     </div>
                     
                     <p style={{ color: '#15803d', fontSize: '0.75rem', margin: '0.5rem 0 0 0' }}>
-                      Comparte esta URL con tus clientes para que puedan hacer reservas online 24/7
+                      📱 Comparte esta URL con tus clientes para que puedan hacer reservas online 24/7
                     </p>
                   </div>
                 )}
@@ -1009,7 +975,7 @@ export default function Configuracion() {
                 ) : (
                   <>
                     <Save size={16} />
-                    Guardar Configuración
+                    💾 Guardar Configuración
                   </>
                 )}
               </button>
@@ -1017,11 +983,11 @@ export default function Configuracion() {
           </div>
         )}
 
-        {/* SECCIÓN: Trabajadores y Servicios (código existente) */}
+        {/* SECCIÓN: Trabajadores y Servicios */}
         {seccionActiva === 'trabajadores' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Agregar Trabajador */}
-            <div className="card" style={{ marginBottom: '1.5rem' }}>
+            <div className="card">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
                 <Plus size={20} style={{ color: '#667eea' }} />
                 <h2 style={{ fontSize: 'clamp(1.125rem, 3vw, 1.25rem)', fontWeight: '600', color: '#1a202c', margin: 0 }}>
@@ -1053,7 +1019,7 @@ export default function Configuracion() {
                   }}
                 >
                   <Plus size={16} />
-                  Añadir Trabajador
+                  ➕ Añadir Trabajador
                 </button>
               </div>
             </div>
@@ -1230,7 +1196,7 @@ export default function Configuracion() {
                                   }}
                                 >
                                   <Plus size={16} />
-                                  Agregar Servicio
+                                  ➕ Agregar Servicio
                                 </button>
                               </div>
                             </div>
@@ -1350,7 +1316,7 @@ export default function Configuracion() {
                                   }}
                                 >
                                   <Plus size={16} />
-                                  Agregar Día Festivo
+                                  📅 Agregar Día Festivo
                                 </button>
                               </div>
                             </div>
@@ -1452,7 +1418,7 @@ export default function Configuracion() {
                   onClick={() => document.querySelector('input')?.focus()}
                   className="btn-primary"
                 >
-                  Añadir Primer Trabajador
+                  ➕ Añadir Primer Trabajador
                 </button>
               </div>
             )}
@@ -1460,10 +1426,10 @@ export default function Configuracion() {
         )}
 
         {/* Resumen */}
-        {trabajadores.length > 0 && (
+        {(trabajadores.length > 0 || datosNegocio.slug) && (
           <div className="card" style={{ marginTop: '2rem' }}>
             <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1a202c', margin: '0 0 1rem 0' }}>
-              Resumen de Configuración
+              📊 Resumen de Configuración
             </h2>
             <div style={{ 
               display: 'grid', 
@@ -1495,7 +1461,7 @@ export default function Configuracion() {
                 </div>
               </div>
               
-              {/* ✅ NUEVO: Mostrar URL pública si está configurada */}
+              {/* Mostrar URL pública si está configurada */}
               {datosNegocio.slug && (
                 <div style={{ textAlign: 'center', padding: '1rem', background: '#f0fdf4', borderRadius: '0.5rem' }}>
                   <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#16a34a', marginBottom: '0.5rem' }}>
@@ -1503,6 +1469,9 @@ export default function Configuracion() {
                   </div>
                   <div style={{ color: '#15803d', fontSize: '0.875rem', fontWeight: '500' }}>
                     URL Pública Activa
+                  </div>
+                  <div style={{ color: '#059669', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                    /reservas/{datosNegocio.slug}
                   </div>
                 </div>
               )}
