@@ -91,16 +91,18 @@ export default function Configuracion() {
       console.log('✅ Trabajadores cargados:', trabajadoresData?.length || 0);
 
       // Procesar trabajadores con sus servicios
-      const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
-        id: t.id,
-        nombre: t.nombre,
-        servicios: t.servicios ? 
-          t.servicios.map((sId) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
-          : [],
-        festivos: t.festivos || [],
-        limiteDiasReserva: t.duracionCitaDefecto || 30,
-        user_id: t.user_id
-      }));
+const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
+  id: t.id,
+  nombre: t.nombre,
+  servicios: t.servicios ? 
+    t.servicios.map((sId) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
+    : [],
+  festivos: t.festivos || [],
+  limiteDiasReserva: t.duracionCitaDefecto || 30,
+  horariosTrabajo: t.horariosTrabajo || {}, // ✅ AGREGAR ESTA LÍNEA
+  tiempoDescanso: t.tiempoDescanso || 15,   // ✅ AGREGAR ESTA LÍNEA
+  user_id: t.user_id
+}));
 
       setTrabajadores(trabajadoresProcesados);
       
@@ -516,7 +518,230 @@ export default function Configuracion() {
       showMessage("Error eliminando día festivo");
     }
   };
+// 🕒 FUNCIÓN: Actualizar horario del trabajador (activar/desactivar día)
+const actualizarHorarioTrabajador = async (trabajadorId, dia, campo, valor) => {
+  if (!user) return;
+  
+  try {
+    const trabajador = trabajadores.find(t => t.id === trabajadorId);
+    if (!trabajador) return;
 
+    // Obtener horarios actuales desde la base de datos
+    const { data: trabajadorDB, error: errorGet } = await supabase
+      .from('trabajadores')
+      .select('horariosTrabajo')
+      .eq('id', trabajadorId)
+      .single();
+
+    if (errorGet) throw errorGet;
+
+    const horariosActuales = trabajadorDB.horariosTrabajo || {};
+    
+    // Actualizar el campo específico
+    const horarioActualizado = {
+      ...horariosActuales,
+      [dia]: {
+        ...horariosActuales[dia],
+        [campo]: valor,
+        // Si se desactiva el día, limpiar franjas
+        franjas: valor === false ? [] : (horariosActuales[dia]?.franjas || [])
+      }
+    };
+
+    // Guardar en base de datos
+    const { error } = await supabase
+      .from('trabajadores')
+      .update({ horariosTrabajo: horarioActualizado })
+      .eq('id', trabajadorId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+
+    // Actualizar estado local
+    setTrabajadores(trabajadores.map(t => {
+      if (t.id === trabajadorId) {
+        return { ...t, horariosTrabajo: horarioActualizado };
+      }
+      return t;
+    }));
+
+    showMessage(`✅ Horario de ${dia} actualizado`);
+  } catch (error) {
+    console.error('Error actualizando horario:', error);
+    showMessage('Error actualizando horario');
+  }
+};
+
+// 🕒 FUNCIÓN: Actualizar franja específica
+const actualizarFranjaTrabajador = async (trabajadorId, dia, franjaIndex, campo, valor) => {
+  if (!user) return;
+  
+  try {
+    const trabajador = trabajadores.find(t => t.id === trabajadorId);
+    if (!trabajador) return;
+
+    // Obtener horarios actuales
+    const { data: trabajadorDB, error: errorGet } = await supabase
+      .from('trabajadores')
+      .select('horariosTrabajo')
+      .eq('id', trabajadorId)
+      .single();
+
+    if (errorGet) throw errorGet;
+
+    const horariosActuales = trabajadorDB.horariosTrabajo || {};
+    const franjasActuales = horariosActuales[dia]?.franjas || [];
+    
+    // Actualizar la franja específica
+    const franjasActualizadas = franjasActuales.map((franja, index) => {
+      if (index === franjaIndex) {
+        return { ...franja, [campo]: valor };
+      }
+      return franja;
+    });
+
+    const horarioActualizado = {
+      ...horariosActuales,
+      [dia]: {
+        ...horariosActuales[dia],
+        franjas: franjasActualizadas
+      }
+    };
+
+    // Guardar en base de datos
+    const { error } = await supabase
+      .from('trabajadores')
+      .update({ horariosTrabajo: horarioActualizado })
+      .eq('id', trabajadorId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+
+    // Actualizar estado local
+    setTrabajadores(trabajadores.map(t => {
+      if (t.id === trabajadorId) {
+        return { ...t, horariosTrabajo: horarioActualizado };
+      }
+      return t;
+    }));
+
+  } catch (error) {
+    console.error('Error actualizando franja:', error);
+    showMessage('Error actualizando horario');
+  }
+};
+
+// 🕒 FUNCIÓN: Agregar nueva franja horaria
+const agregarFranjaTrabajador = async (trabajadorId, dia) => {
+  if (!user) return;
+  
+  try {
+    const trabajador = trabajadores.find(t => t.id === trabajadorId);
+    if (!trabajador) return;
+
+    // Obtener horarios actuales
+    const { data: trabajadorDB, error: errorGet } = await supabase
+      .from('trabajadores')
+      .select('horariosTrabajo')
+      .eq('id', trabajadorId)
+      .single();
+
+    if (errorGet) throw errorGet;
+
+    const horariosActuales = trabajadorDB.horariosTrabajo || {};
+    const franjasActuales = horariosActuales[dia]?.franjas || [];
+    
+    // Nueva franja por defecto
+    const nuevaFranja = { inicio: "09:00", fin: "13:00" };
+    const franjasActualizadas = [...franjasActuales, nuevaFranja];
+
+    const horarioActualizado = {
+      ...horariosActuales,
+      [dia]: {
+        ...horariosActuales[dia],
+        activo: true,
+        franjas: franjasActualizadas
+      }
+    };
+
+    // Guardar en base de datos
+    const { error } = await supabase
+      .from('trabajadores')
+      .update({ horariosTrabajo: horarioActualizado })
+      .eq('id', trabajadorId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+
+    // Actualizar estado local
+    setTrabajadores(trabajadores.map(t => {
+      if (t.id === trabajadorId) {
+        return { ...t, horariosTrabajo: horarioActualizado };
+      }
+      return t;
+    }));
+
+    showMessage(`✅ Nueva franja agregada para ${dia}`);
+  } catch (error) {
+    console.error('Error agregando franja:', error);
+    showMessage('Error agregando horario');
+  }
+};
+
+// 🕒 FUNCIÓN: Eliminar franja horaria
+const eliminarFranjaTrabajador = async (trabajadorId, dia, franjaIndex) => {
+  if (!user || !confirm('¿Estás seguro de que quieres eliminar esta franja horaria?')) return;
+  
+  try {
+    const trabajador = trabajadores.find(t => t.id === trabajadorId);
+    if (!trabajador) return;
+
+    // Obtener horarios actuales
+    const { data: trabajadorDB, error: errorGet } = await supabase
+      .from('trabajadores')
+      .select('horariosTrabajo')
+      .eq('id', trabajadorId)
+      .single();
+
+    if (errorGet) throw errorGet;
+
+    const horariosActuales = trabajadorDB.horariosTrabajo || {};
+    const franjasActuales = horariosActuales[dia]?.franjas || [];
+    
+    // Eliminar la franja específica
+    const franjasActualizadas = franjasActuales.filter((_, index) => index !== franjaIndex);
+
+    const horarioActualizado = {
+      ...horariosActuales,
+      [dia]: {
+        ...horariosActuales[dia],
+        franjas: franjasActualizadas
+      }
+    };
+
+    // Guardar en base de datos
+    const { error } = await supabase
+      .from('trabajadores')
+      .update({ horariosTrabajo: horarioActualizado })
+      .eq('id', trabajadorId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+
+    // Actualizar estado local
+    setTrabajadores(trabajadores.map(t => {
+      if (t.id === trabajadorId) {
+        return { ...t, horariosTrabajo: horarioActualizado };
+      }
+      return t;
+    }));
+
+    showMessage(`✅ Franja eliminada de ${dia}`);
+  } catch (error) {
+    console.error('Error eliminando franja:', error);
+    showMessage('Error eliminando horario');
+  }
+};
   const formatearFecha = (fecha) => {
     return new Date(fecha).toLocaleDateString('es-ES', {
       day: 'numeric',
