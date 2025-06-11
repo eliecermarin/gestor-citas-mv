@@ -295,18 +295,18 @@ export default function Configuracion() {
   };
 
   const agregarTrabajador = async () => {
-    if (!nuevoTrabajador.trim() || !user) return;
-    
-    try {
-      console.log('🔄 Intentando crear trabajador:', nuevoTrabajador);
-      
-      const trabajadorData = {
-        nombre: nuevoTrabajador.trim(),
-        servicios: [],
-        festivos: [],
-        duracionCitaDefecto: 30,
-        user_id: user.id
-      };
+  // ... código con horarios incluidos
+  const trabajadorData = {
+    nombre: nuevoTrabajador.trim(),
+    servicios: [],
+    festivos: [],
+    duracionCitaDefecto: 30,
+    user_id: user.id,
+    horariosTrabajo: horariosDefecto, // ✅ NUEVO
+    tiempoDescanso: 15,              // ✅ NUEVO  
+    limiteDiasReserva: 30            // ✅ NUEVO
+  };
+}
 
       const { data, error } = await supabase
         .from('trabajadores')
