@@ -305,7 +305,7 @@ export default function Configuracion() {
     horariosTrabajo: horariosDefecto, // ✅ NUEVO
     tiempoDescanso: 15,              // ✅ NUEVO  
     limiteDiasReserva: 30            // ✅ NUEVO
-  };
+      };
 
       const { data, error } = await supabase
         .from('trabajadores')
