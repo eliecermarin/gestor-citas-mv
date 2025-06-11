@@ -1,9 +1,8 @@
-// pages/reservas/[slug].js
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../../supabaseClient';
 import ReservationSystem from '../../components/ReservationSystem';
-import { Calendar, AlertCircle, MapPin, Phone, Clock, Users, Star } from 'lucide-react';
+import { Calendar, AlertCircle, MapPin, Phone, Clock } from 'lucide-react';
 
 export default function PublicReservationPage() {
   const router = useRouter();
@@ -24,31 +23,35 @@ export default function PublicReservationPage() {
       setIsLoading(true);
       setError(null);
 
+      console.log('🔍 Buscando negocio con slug:', slug);
+
       // 🔍 BUSCAR NEGOCIO POR SLUG
       const { data: business, error: businessError } = await supabase
         .from('configuracion')
-        .select(`
-          *,
-          trabajadores:trabajadores(count),
-          servicios:servicios(count)
-        `)
+        .select('*')
         .eq('slug', slug)
         .single();
 
+      console.log('📊 Resultado búsqueda:', { business, businessError });
+
       if (businessError) {
         if (businessError.code === 'PGRST116') {
+          console.log('❌ Negocio no encontrado');
           setError('NEGOCIO_NO_ENCONTRADO');
         } else {
-          console.error('Error cargando negocio:', businessError);
+          console.error('❌ Error servidor:', businessError);
           setError('ERROR_SERVIDOR');
         }
         return;
       }
 
       if (!business) {
+        console.log('❌ Sin datos de negocio');
         setError('NEGOCIO_NO_ENCONTRADO');
         return;
       }
+
+      console.log('✅ Negocio encontrado:', business.nombre_negocio);
 
       // ✅ VERIFICAR QUE EL NEGOCIO ESTÁ CONFIGURADO
       const { data: trabajadores } = await supabase
@@ -63,15 +66,22 @@ export default function PublicReservationPage() {
         .eq('user_id', business.user_id)
         .limit(1);
 
+      console.log('📊 Verificación:', { 
+        trabajadores: trabajadores?.length || 0, 
+        servicios: servicios?.length || 0 
+      });
+
       if (!trabajadores?.length || !servicios?.length) {
+        console.log('❌ Negocio no configurado');
         setError('NEGOCIO_NO_CONFIGURADO');
         return;
       }
 
+      console.log('✅ Todo listo, cargando negocio');
       setBusinessData(business);
       
     } catch (error) {
-      console.error('Error inesperado:', error);
+      console.error('💥 Error inesperado:', error);
       setError('ERROR_INESPERADO');
     } finally {
       setIsLoading(false);
@@ -157,13 +167,12 @@ export default function PublicReservationPage() {
               >
                 Recargar página
               </button>
-              
-              <button 
-                onClick={() => router.push('/buscar-negocio')}
-                className="w-full bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition-colors font-medium"
-              >
-                Buscar otro negocio
-              </button>
+            </div>
+
+            {/* 🔧 DEBUG INFO */}
+            <div className="mt-4 p-3 bg-gray-100 rounded text-xs text-gray-500">
+              <p>Debug: slug = "{slug}"</p>
+              <p>Error: {error}</p>
             </div>
           </div>
         </div>
@@ -214,36 +223,6 @@ export default function PublicReservationPage() {
                 )}
               </div>
             </div>
-            
-            {/* 📊 STATS DEL NEGOCIO */}
-            <div className="flex gap-6 p-4 bg-blue-50 rounded-xl">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">
-                  {businessData.trabajadores?.[0]?.count || 0}
-                </div>
-                <div className="text-xs text-blue-700 font-medium">
-                  Profesionales
-                </div>
-              </div>
-              
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">
-                  {businessData.servicios?.[0]?.count || 0}
-                </div>
-                <div className="text-xs text-green-700 font-medium">
-                  Servicios
-                </div>
-              </div>
-              
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">
-                  {businessData.dias_reserva_max || 30}
-                </div>
-                <div className="text-xs text-purple-700 font-medium">
-                  Días máx
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -271,9 +250,6 @@ export default function PublicReservationPage() {
 // 🔧 NEXT.JS: Configuración para páginas dinámicas
 export async function getServerSideProps(context) {
   const { slug } = context.params;
-  
-  // Opcional: Pre-validar el slug en el servidor
-  // Esto mejora SEO y evita carga innecesaria en el cliente
   
   return {
     props: {
