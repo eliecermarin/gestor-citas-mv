@@ -295,49 +295,39 @@ export default function Configuracion() {
   };
 
   const agregarTrabajador = async () => {
-  // ... código con horarios incluidos
-  const trabajadorData = {
-    nombre: nuevoTrabajador.trim(),
-    servicios: [],
-    festivos: [],
-    duracionCitaDefecto: 30,
-    user_id: user.id,
-    horariosTrabajo: horariosDefecto, // ✅ NUEVO
-    tiempoDescanso: 15,              // ✅ NUEVO  
-    limiteDiasReserva: 30            // ✅ NUEVO
-      };
-
-      const { data, error } = await supabase
-        .from('trabajadores')
-        .insert([trabajadorData])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('❌ Error:', error);
-        throw error;
-      }
-
-      const nuevoTrab = {
-        id: data.id,
-        nombre: data.nombre,
-        servicios: [],
-        festivos: data.festivos || [],
-        limiteDiasReserva: data.duracionCitaDefecto || 30,
-        user_id: data.user_id
+    if (!nuevoTrabajador.trim() || !user) return;
+    
+    try {
+      console.log('🔄 Intentando crear trabajador:', nuevoTrabajador);
+      
+      // ✅ HORARIOS POR DEFECTO (Lunes-Viernes: 9-13 y 15-19)
+      const horariosDefecto = {
+        "lunes": {
+          "activo": true,
+          "franjas": [
+            {"inicio": "09:00", "fin": "13:00"},
+            {"inicio": "15:00", "fin": "19:00"}
+          ]
+        },
+        // ... resto del código
       };
       
-      setTrabajadores([...trabajadores, nuevoTrab]);
-      setNuevoTrabajador("");
-      setTrabajadorExpandido(data.id);
-      inicializarEstadosTrabajador(data.id);
-      showMessage("✅ Trabajador agregado exitosamente");
-
+      const trabajadorData = {
+        nombre: nuevoTrabajador.trim(),
+        servicios: [],
+        festivos: [],
+        duracionCitaDefecto: 30,
+        user_id: user.id,
+        horariosTrabajo: horariosDefecto,  // ← ESTA ES LA LÍNEA CLAVE
+        tiempoDescanso: 15,
+        limiteDiasReserva: 30
+      };
+      // ... resto del código
     } catch (error) {
       console.error('❌ Error completo:', error);
       showMessage(`Error: ${error.message || 'Error desconocido'}`);
     }
-  };
+  };  
 
   const eliminarTrabajador = async (id) => {
     if (!user || !confirm('¿Estás seguro de que quieres eliminar este trabajador?')) return;
