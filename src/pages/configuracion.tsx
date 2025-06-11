@@ -90,19 +90,19 @@ export default function Configuracion() {
 
       console.log('✅ Trabajadores cargados:', trabajadoresData?.length || 0);
 
-      // Procesar trabajadores con sus servicios
-const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
-  id: t.id,
-  nombre: t.nombre,
-  servicios: t.servicios ? 
-    t.servicios.map((sId) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
-    : [],
-  festivos: t.festivos || [],
-  limiteDiasReserva: t.duracionCitaDefecto || 30,
-  horariosTrabajo: t.horariosTrabajo || {}, // ✅ AGREGAR ESTA LÍNEA
-  tiempoDescanso: t.tiempoDescanso || 15,   // ✅ AGREGAR ESTA LÍNEA
-  user_id: t.user_id
-}));
+      // Procesar trabajadores con sus servicios Y HORARIOS
+      const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
+        id: t.id,
+        nombre: t.nombre,
+        servicios: t.servicios ? 
+          t.servicios.map((sId) => servicios?.find(s => s.id === sId)).filter(Boolean) || [] 
+          : [],
+        festivos: t.festivos || [],
+        limiteDiasReserva: t.duracionCitaDefecto || 30,
+        horariosTrabajo: t.horariosTrabajo || {}, // ✅ CARGAR HORARIOS
+        tiempoDescanso: t.tiempoDescanso || 15,   // ✅ CARGAR TIEMPO DESCANSO
+        user_id: t.user_id
+      }));
 
       setTrabajadores(trabajadoresProcesados);
       
@@ -296,6 +296,7 @@ const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
     }));
   };
 
+  // ✅ FUNCIÓN AGREGAR TRABAJADOR CON HORARIOS POR DEFECTO
   const agregarTrabajador = async () => {
     if (!nuevoTrabajador.trim() || !user) return;
     
@@ -311,7 +312,42 @@ const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
             {"inicio": "15:00", "fin": "19:00"}
           ]
         },
-        // ... resto del código
+        "martes": {
+          "activo": true,
+          "franjas": [
+            {"inicio": "09:00", "fin": "13:00"},
+            {"inicio": "15:00", "fin": "19:00"}
+          ]
+        },
+        "miercoles": {
+          "activo": true,
+          "franjas": [
+            {"inicio": "09:00", "fin": "13:00"},
+            {"inicio": "15:00", "fin": "19:00"}
+          ]
+        },
+        "jueves": {
+          "activo": true,
+          "franjas": [
+            {"inicio": "09:00", "fin": "13:00"},
+            {"inicio": "15:00", "fin": "19:00"}
+          ]
+        },
+        "viernes": {
+          "activo": true,
+          "franjas": [
+            {"inicio": "09:00", "fin": "13:00"},
+            {"inicio": "15:00", "fin": "19:00"}
+          ]
+        },
+        "sabado": {
+          "activo": false,
+          "franjas": []
+        },
+        "domingo": {
+          "activo": false,
+          "franjas": []
+        }
       };
       
       const trabajadorData = {
@@ -320,16 +356,49 @@ const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
         festivos: [],
         duracionCitaDefecto: 30,
         user_id: user.id,
-        horariosTrabajo: horariosDefecto,  // ← ESTA ES LA LÍNEA CLAVE
+        // 🔥 AGREGAR HORARIOS OBLIGATORIOS
+        horariosTrabajo: horariosDefecto,
         tiempoDescanso: 15,
         limiteDiasReserva: 30
       };
-      // ... resto del código
+
+      console.log('📝 Datos a insertar:', trabajadorData);
+
+      const { data, error } = await supabase
+        .from('trabajadores')
+        .insert([trabajadorData])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error SQL:', error);
+        throw error;
+      }
+
+      console.log('✅ Trabajador creado:', data);
+
+      const nuevoTrab = {
+        id: data.id,
+        nombre: data.nombre,
+        servicios: [],
+        festivos: data.festivos || [],
+        limiteDiasReserva: data.duracionCitaDefecto || 30,
+        horariosTrabajo: data.horariosTrabajo || horariosDefecto,
+        tiempoDescanso: data.tiempoDescanso || 15,
+        user_id: data.user_id
+      };
+      
+      setTrabajadores([...trabajadores, nuevoTrab]);
+      setNuevoTrabajador("");
+      setTrabajadorExpandido(data.id);
+      inicializarEstadosTrabajador(data.id);
+      showMessage("✅ Trabajador agregado con horarios: L-V 9:00-13:00 y 15:00-19:00");
+
     } catch (error) {
       console.error('❌ Error completo:', error);
       showMessage(`Error: ${error.message || 'Error desconocido'}`);
     }
-  };  
+  };
 
   const eliminarTrabajador = async (id) => {
     if (!user || !confirm('¿Estás seguro de que quieres eliminar este trabajador?')) return;
@@ -353,6 +422,228 @@ const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
     } catch (error) {
       console.error('Error eliminando trabajador:', error);
       showMessage("Error eliminando trabajador");
+    }
+  };
+
+  // 🕒 FUNCIONES PARA MANEJAR HORARIOS
+  const actualizarHorarioTrabajador = async (trabajadorId, dia, campo, valor) => {
+    if (!user) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      // Obtener horarios actuales desde la base de datos
+      const { data: trabajadorDB, error: errorGet } = await supabase
+        .from('trabajadores')
+        .select('horariosTrabajo')
+        .eq('id', trabajadorId)
+        .single();
+
+      if (errorGet) throw errorGet;
+
+      const horariosActuales = trabajadorDB.horariosTrabajo || {};
+      
+      // Actualizar el campo específico
+      const horarioActualizado = {
+        ...horariosActuales,
+        [dia]: {
+          ...horariosActuales[dia],
+          [campo]: valor,
+          // Si se desactiva el día, limpiar franjas
+          franjas: valor === false ? [] : (horariosActuales[dia]?.franjas || [])
+        }
+      };
+
+      // Guardar en base de datos
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ horariosTrabajo: horarioActualizado })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Actualizar estado local
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, horariosTrabajo: horarioActualizado };
+        }
+        return t;
+      }));
+
+      showMessage(`✅ Horario de ${dia} actualizado`);
+    } catch (error) {
+      console.error('Error actualizando horario:', error);
+      showMessage('Error actualizando horario');
+    }
+  };
+
+  const actualizarFranjaTrabajador = async (trabajadorId, dia, franjaIndex, campo, valor) => {
+    if (!user) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      // Obtener horarios actuales
+      const { data: trabajadorDB, error: errorGet } = await supabase
+        .from('trabajadores')
+        .select('horariosTrabajo')
+        .eq('id', trabajadorId)
+        .single();
+
+      if (errorGet) throw errorGet;
+
+      const horariosActuales = trabajadorDB.horariosTrabajo || {};
+      const franjasActuales = horariosActuales[dia]?.franjas || [];
+      
+      // Actualizar la franja específica
+      const franjasActualizadas = franjasActuales.map((franja, index) => {
+        if (index === franjaIndex) {
+          return { ...franja, [campo]: valor };
+        }
+        return franja;
+      });
+
+      const horarioActualizado = {
+        ...horariosActuales,
+        [dia]: {
+          ...horariosActuales[dia],
+          franjas: franjasActualizadas
+        }
+      };
+
+      // Guardar en base de datos
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ horariosTrabajo: horarioActualizado })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Actualizar estado local
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, horariosTrabajo: horarioActualizado };
+        }
+        return t;
+      }));
+
+    } catch (error) {
+      console.error('Error actualizando franja:', error);
+      showMessage('Error actualizando horario');
+    }
+  };
+
+  const agregarFranjaTrabajador = async (trabajadorId, dia) => {
+    if (!user) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      // Obtener horarios actuales
+      const { data: trabajadorDB, error: errorGet } = await supabase
+        .from('trabajadores')
+        .select('horariosTrabajo')
+        .eq('id', trabajadorId)
+        .single();
+
+      if (errorGet) throw errorGet;
+
+      const horariosActuales = trabajadorDB.horariosTrabajo || {};
+      const franjasActuales = horariosActuales[dia]?.franjas || [];
+      
+      // Nueva franja por defecto
+      const nuevaFranja = { inicio: "09:00", fin: "13:00" };
+      const franjasActualizadas = [...franjasActuales, nuevaFranja];
+
+      const horarioActualizado = {
+        ...horariosActuales,
+        [dia]: {
+          ...horariosActuales[dia],
+          activo: true,
+          franjas: franjasActualizadas
+        }
+      };
+
+      // Guardar en base de datos
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ horariosTrabajo: horarioActualizado })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Actualizar estado local
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, horariosTrabajo: horarioActualizado };
+        }
+        return t;
+      }));
+
+      showMessage(`✅ Nueva franja agregada para ${dia}`);
+    } catch (error) {
+      console.error('Error agregando franja:', error);
+      showMessage('Error agregando horario');
+    }
+  };
+
+  const eliminarFranjaTrabajador = async (trabajadorId, dia, franjaIndex) => {
+    if (!user || !confirm('¿Estás seguro de que quieres eliminar esta franja horaria?')) return;
+    
+    try {
+      const trabajador = trabajadores.find(t => t.id === trabajadorId);
+      if (!trabajador) return;
+
+      // Obtener horarios actuales
+      const { data: trabajadorDB, error: errorGet } = await supabase
+        .from('trabajadores')
+        .select('horariosTrabajo')
+        .eq('id', trabajadorId)
+        .single();
+
+      if (errorGet) throw errorGet;
+
+      const horariosActuales = trabajadorDB.horariosTrabajo || {};
+      const franjasActuales = horariosActuales[dia]?.franjas || [];
+      
+      // Eliminar la franja específica
+      const franjasActualizadas = franjasActuales.filter((_, index) => index !== franjaIndex);
+
+      const horarioActualizado = {
+        ...horariosActuales,
+        [dia]: {
+          ...horariosActuales[dia],
+          franjas: franjasActualizadas
+        }
+      };
+
+      // Guardar en base de datos
+      const { error } = await supabase
+        .from('trabajadores')
+        .update({ horariosTrabajo: horarioActualizado })
+        .eq('id', trabajadorId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Actualizar estado local
+      setTrabajadores(trabajadores.map(t => {
+        if (t.id === trabajadorId) {
+          return { ...t, horariosTrabajo: horarioActualizado };
+        }
+        return t;
+      }));
+
+      showMessage(`✅ Franja eliminada de ${dia}`);
+    } catch (error) {
+      console.error('Error eliminando franja:', error);
+      showMessage('Error eliminando horario');
     }
   };
 
@@ -518,230 +809,7 @@ const trabajadoresProcesados = (trabajadoresData || []).map((t) => ({
       showMessage("Error eliminando día festivo");
     }
   };
-// 🕒 FUNCIÓN: Actualizar horario del trabajador (activar/desactivar día)
-const actualizarHorarioTrabajador = async (trabajadorId, dia, campo, valor) => {
-  if (!user) return;
-  
-  try {
-    const trabajador = trabajadores.find(t => t.id === trabajadorId);
-    if (!trabajador) return;
 
-    // Obtener horarios actuales desde la base de datos
-    const { data: trabajadorDB, error: errorGet } = await supabase
-      .from('trabajadores')
-      .select('horariosTrabajo')
-      .eq('id', trabajadorId)
-      .single();
-
-    if (errorGet) throw errorGet;
-
-    const horariosActuales = trabajadorDB.horariosTrabajo || {};
-    
-    // Actualizar el campo específico
-    const horarioActualizado = {
-      ...horariosActuales,
-      [dia]: {
-        ...horariosActuales[dia],
-        [campo]: valor,
-        // Si se desactiva el día, limpiar franjas
-        franjas: valor === false ? [] : (horariosActuales[dia]?.franjas || [])
-      }
-    };
-
-    // Guardar en base de datos
-    const { error } = await supabase
-      .from('trabajadores')
-      .update({ horariosTrabajo: horarioActualizado })
-      .eq('id', trabajadorId)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-
-    // Actualizar estado local
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return { ...t, horariosTrabajo: horarioActualizado };
-      }
-      return t;
-    }));
-
-    showMessage(`✅ Horario de ${dia} actualizado`);
-  } catch (error) {
-    console.error('Error actualizando horario:', error);
-    showMessage('Error actualizando horario');
-  }
-};
-
-// 🕒 FUNCIÓN: Actualizar franja específica
-const actualizarFranjaTrabajador = async (trabajadorId, dia, franjaIndex, campo, valor) => {
-  if (!user) return;
-  
-  try {
-    const trabajador = trabajadores.find(t => t.id === trabajadorId);
-    if (!trabajador) return;
-
-    // Obtener horarios actuales
-    const { data: trabajadorDB, error: errorGet } = await supabase
-      .from('trabajadores')
-      .select('horariosTrabajo')
-      .eq('id', trabajadorId)
-      .single();
-
-    if (errorGet) throw errorGet;
-
-    const horariosActuales = trabajadorDB.horariosTrabajo || {};
-    const franjasActuales = horariosActuales[dia]?.franjas || [];
-    
-    // Actualizar la franja específica
-    const franjasActualizadas = franjasActuales.map((franja, index) => {
-      if (index === franjaIndex) {
-        return { ...franja, [campo]: valor };
-      }
-      return franja;
-    });
-
-    const horarioActualizado = {
-      ...horariosActuales,
-      [dia]: {
-        ...horariosActuales[dia],
-        franjas: franjasActualizadas
-      }
-    };
-
-    // Guardar en base de datos
-    const { error } = await supabase
-      .from('trabajadores')
-      .update({ horariosTrabajo: horarioActualizado })
-      .eq('id', trabajadorId)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-
-    // Actualizar estado local
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return { ...t, horariosTrabajo: horarioActualizado };
-      }
-      return t;
-    }));
-
-  } catch (error) {
-    console.error('Error actualizando franja:', error);
-    showMessage('Error actualizando horario');
-  }
-};
-
-// 🕒 FUNCIÓN: Agregar nueva franja horaria
-const agregarFranjaTrabajador = async (trabajadorId, dia) => {
-  if (!user) return;
-  
-  try {
-    const trabajador = trabajadores.find(t => t.id === trabajadorId);
-    if (!trabajador) return;
-
-    // Obtener horarios actuales
-    const { data: trabajadorDB, error: errorGet } = await supabase
-      .from('trabajadores')
-      .select('horariosTrabajo')
-      .eq('id', trabajadorId)
-      .single();
-
-    if (errorGet) throw errorGet;
-
-    const horariosActuales = trabajadorDB.horariosTrabajo || {};
-    const franjasActuales = horariosActuales[dia]?.franjas || [];
-    
-    // Nueva franja por defecto
-    const nuevaFranja = { inicio: "09:00", fin: "13:00" };
-    const franjasActualizadas = [...franjasActuales, nuevaFranja];
-
-    const horarioActualizado = {
-      ...horariosActuales,
-      [dia]: {
-        ...horariosActuales[dia],
-        activo: true,
-        franjas: franjasActualizadas
-      }
-    };
-
-    // Guardar en base de datos
-    const { error } = await supabase
-      .from('trabajadores')
-      .update({ horariosTrabajo: horarioActualizado })
-      .eq('id', trabajadorId)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-
-    // Actualizar estado local
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return { ...t, horariosTrabajo: horarioActualizado };
-      }
-      return t;
-    }));
-
-    showMessage(`✅ Nueva franja agregada para ${dia}`);
-  } catch (error) {
-    console.error('Error agregando franja:', error);
-    showMessage('Error agregando horario');
-  }
-};
-
-// 🕒 FUNCIÓN: Eliminar franja horaria
-const eliminarFranjaTrabajador = async (trabajadorId, dia, franjaIndex) => {
-  if (!user || !confirm('¿Estás seguro de que quieres eliminar esta franja horaria?')) return;
-  
-  try {
-    const trabajador = trabajadores.find(t => t.id === trabajadorId);
-    if (!trabajador) return;
-
-    // Obtener horarios actuales
-    const { data: trabajadorDB, error: errorGet } = await supabase
-      .from('trabajadores')
-      .select('horariosTrabajo')
-      .eq('id', trabajadorId)
-      .single();
-
-    if (errorGet) throw errorGet;
-
-    const horariosActuales = trabajadorDB.horariosTrabajo || {};
-    const franjasActuales = horariosActuales[dia]?.franjas || [];
-    
-    // Eliminar la franja específica
-    const franjasActualizadas = franjasActuales.filter((_, index) => index !== franjaIndex);
-
-    const horarioActualizado = {
-      ...horariosActuales,
-      [dia]: {
-        ...horariosActuales[dia],
-        franjas: franjasActualizadas
-      }
-    };
-
-    // Guardar en base de datos
-    const { error } = await supabase
-      .from('trabajadores')
-      .update({ horariosTrabajo: horarioActualizado })
-      .eq('id', trabajadorId)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-
-    // Actualizar estado local
-    setTrabajadores(trabajadores.map(t => {
-      if (t.id === trabajadorId) {
-        return { ...t, horariosTrabajo: horarioActualizado };
-      }
-      return t;
-    }));
-
-    showMessage(`✅ Franja eliminada de ${dia}`);
-  } catch (error) {
-    console.error('Error eliminando franja:', error);
-    showMessage('Error eliminando horario');
-  }
-};
   const formatearFecha = (fecha) => {
     return new Date(fecha).toLocaleDateString('es-ES', {
       day: 'numeric',
@@ -1473,6 +1541,146 @@ const eliminarFranjaTrabajador = async (trabajadorId, dia, franjaIndex) => {
                                   <p style={{ color: '#666', margin: 0, fontSize: '0.875rem' }}>No hay servicios configurados</p>
                                 </div>
                               )}
+                            </div>
+                          </div>
+
+                          {/* ✅ HORARIOS DE TRABAJO */}
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                              <Clock size={20} style={{ color: '#f59e0b' }} />
+                              <h4 style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1a202c', margin: 0 }}>
+                                Horarios de Trabajo
+                              </h4>
+                            </div>
+
+                            <div style={{ 
+                              background: '#fefbf3', 
+                              border: '1px solid #fed7aa', 
+                              borderRadius: '0.75rem', 
+                              padding: '1rem',
+                              marginBottom: '1rem'
+                            }}>
+                              <div style={{ display: 'grid', gap: '1rem' }}>
+                                {['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].map((dia) => {
+                                  const horarioDia = trabajador.horariosTrabajo?.[dia] || { activo: false, franjas: [] };
+                                  const nombreDia = dia.charAt(0).toUpperCase() + dia.slice(1);
+                                  
+                                  return (
+                                    <div key={dia} style={{ 
+                                      background: 'white', 
+                                      border: `1px solid ${horarioDia.activo ? '#bbf7d0' : '#e5e7eb'}`,
+                                      borderRadius: '0.5rem', 
+                                      padding: '1rem' 
+                                    }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                                        <label style={{ 
+                                          fontSize: '0.875rem', 
+                                          fontWeight: '600', 
+                                          color: horarioDia.activo ? '#16a34a' : '#6b7280' 
+                                        }}>
+                                          {nombreDia}
+                                        </label>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={horarioDia.activo}
+                                            onChange={(e) => actualizarHorarioTrabajador(trabajador.id, dia, 'activo', e.target.checked)}
+                                            style={{ width: '16px', height: '16px' }}
+                                          />
+                                          <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                            {horarioDia.activo ? 'Disponible' : 'No disponible'}
+                                          </span>
+                                        </label>
+                                      </div>
+                                      
+                                      {horarioDia.activo && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                          {/* Franjas horarias existentes */}
+                                          {horarioDia.franjas?.map((franja, index) => (
+                                            <div key={index} style={{ 
+                                              display: 'flex', 
+                                              alignItems: 'center', 
+                                              gap: '0.5rem',
+                                              padding: '0.5rem',
+                                              background: '#f0fdf4',
+                                              borderRadius: '0.25rem',
+                                              border: '1px solid #bbf7d0'
+                                            }}>
+                                              <input
+                                                type="time"
+                                                value={franja.inicio}
+                                                onChange={(e) => actualizarFranjaTrabajador(trabajador.id, dia, index, 'inicio', e.target.value)}
+                                                style={{ 
+                                                  padding: '0.25rem', 
+                                                  border: '1px solid #d1d5db', 
+                                                  borderRadius: '0.25rem',
+                                                  fontSize: '0.75rem'
+                                                }}
+                                              />
+                                              <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>-</span>
+                                              <input
+                                                type="time"
+                                                value={franja.fin}
+                                                onChange={(e) => actualizarFranjaTrabajador(trabajador.id, dia, index, 'fin', e.target.value)}
+                                                style={{ 
+                                                  padding: '0.25rem', 
+                                                  border: '1px solid #d1d5db', 
+                                                  borderRadius: '0.25rem',
+                                                  fontSize: '0.75rem'
+                                                }}
+                                              />
+                                              <button
+                                                onClick={() => eliminarFranjaTrabajador(trabajador.id, dia, index)}
+                                                style={{
+                                                  background: '#fef2f2',
+                                                  border: '1px solid #fecaca',
+                                                  borderRadius: '0.25rem',
+                                                  padding: '0.25rem',
+                                                  color: '#dc2626',
+                                                  cursor: 'pointer',
+                                                  fontSize: '0.75rem'
+                                                }}
+                                                title="Eliminar franja"
+                                              >
+                                                ✕
+                                              </button>
+                                            </div>
+                                          ))}
+                                          
+                                          {/* Botón para agregar nueva franja */}
+                                          <button
+                                            onClick={() => agregarFranjaTrabajador(trabajador.id, dia)}
+                                            style={{
+                                              background: '#f0fdf4',
+                                              border: '1px dashed #bbf7d0',
+                                              borderRadius: '0.25rem',
+                                              padding: '0.5rem',
+                                              color: '#16a34a',
+                                              cursor: 'pointer',
+                                              fontSize: '0.75rem',
+                                              fontWeight: '500'
+                                            }}
+                                          >
+                                            + Agregar horario
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              
+                              <div style={{ 
+                                marginTop: '1rem', 
+                                padding: '0.75rem', 
+                                background: '#eff6ff', 
+                                borderRadius: '0.5rem',
+                                border: '1px solid #bfdbfe'
+                              }}>
+                                <p style={{ color: '#1e40af', fontSize: '0.75rem', margin: 0 }}>
+                                  💡 <strong>Tip:</strong> Puedes configurar múltiples franjas horarias por día (ej: 9:00-13:00 y 15:00-19:00)
+                                </p>
+                              </div>
                             </div>
                           </div>
 
