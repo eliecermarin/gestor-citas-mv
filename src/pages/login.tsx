@@ -90,58 +90,99 @@ export default function Login() {
 
   // ✅ REGISTRO SIMPLIFICADO (SIN CREAR DATOS ADICIONALES)
   const handleRegister = async () => {
-    if (!email || !password) {
-      setError("Por favor, completa todos los campos");
+  if (!email || !password) {
+    setError("Por favor, completa todos los campos");
+    return;
+  }
+
+  if (password.length < 6) {
+    setError("La contraseña debe tener al menos 6 caracteres");
+    return;
+  }
+
+  setLoading(true);
+  setError("");
+  setMessage("");
+
+  try {
+    console.log('🔄 Intentando registro con:', email);
+
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password: password,
+    });
+
+    if (error) {
+      console.error('❌ Error de registro:', error);
+      
+      if (error.message.includes('User already registered')) {
+        setError("Este email ya está registrado. Prueba a iniciar sesión.");
+      } else {
+        setError(`Error: ${error.message}`);
+      }
       return;
     }
 
-    if (password.length < 6) {
-      setError("La contraseña debe tener al menos 6 caracteres");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      console.log('🔄 Intentando registro con:', email);
-
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password: password,
-      });
-
-      if (error) {
-        console.error('❌ Error de registro:', error);
+    if (data.user) {
+      console.log('✅ Usuario creado:', data.user.id);
+      
+      // ✅ NUEVO: Crear registro en tabla clientes automáticamente
+      try {
+        console.log('📝 Creando registro en tabla clientes...');
         
-        if (error.message.includes('User already registered')) {
-          setError("Este email ya está registrado. Prueba a iniciar sesión.");
+        const { error: clientError } = await supabase
+          .from('clientes')
+          .insert([{
+            id: data.user.id,
+            email: data.user.email,
+            fecha_alta: new Date().toISOString().split('T')[0],
+            estado_prueba: 'activo',
+            onboarding: false
+          }]);
+
+        if (clientError) {
+          console.error('⚠️ Error creando cliente (no crítico):', clientError);
+          // No fallar el registro si esto falla
         } else {
-          setError(`Error: ${error.message}`);
+          console.log('✅ Registro en clientes creado exitosamente');
         }
-        return;
+      } catch (clientErr) {
+        console.warn('⚠️ Error en creación de cliente:', clientErr);
+        // No fallar el registro por este error
       }
 
-      if (data.user) {
-        console.log('✅ Usuario creado:', data.user.id);
+      // ✅ NUEVO: Crear configuración inicial automáticamente
+      try {
+        console.log('⚙️ Creando configuración inicial...');
         
-        // ✅ NO CREAR DATOS ADICIONALES AQUÍ
-        // Los crearemos después del primer login exitoso
-        
-        setMessage("✅ ¡Cuenta creada exitosamente! Ahora puedes iniciar sesión.");
-        setIsRegistering(false);
-        
-        // ✅ LIMPIAR CAMPOS PARA EL LOGIN
-        setPassword("");
+        const { error: configError } = await supabase
+          .from('configuracion')
+          .insert([{
+            user_id: data.user.id,
+            nombre_negocio: 'Mi Negocio',
+            dias_reserva_max: 30
+          }]);
+
+        if (configError) {
+          console.error('⚠️ Error creando configuración (no crítico):', configError);
+        } else {
+          console.log('✅ Configuración inicial creada');
+        }
+      } catch (configErr) {
+        console.warn('⚠️ Error en configuración inicial:', configErr);
       }
-    } catch (error) {
-      console.error('💥 Error en registro:', error);
-      setError("Error al crear la cuenta");
-    } finally {
-      setLoading(false);
+
+      setMessage("✅ ¡Cuenta creada exitosamente! Ahora puedes iniciar sesión.");
+      setIsRegistering(false);
+      setPassword("");
     }
-  };
+  } catch (error) {
+    console.error('💥 Error en registro:', error);
+    setError("Error al crear la cuenta");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const clearMessages = () => {
     setError("");
