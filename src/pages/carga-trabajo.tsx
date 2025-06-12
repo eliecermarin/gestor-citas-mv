@@ -573,95 +573,199 @@ export default function AgendaSemanal() {
     return servicio ? servicio.duracion : 30;
   };
 
-  const guardarReserva = async () => {
-    if (!user || !trabajadorActivo) {
-      showMessage('Error: Usuario o trabajador no válido', 'error');
-      return;
+  // 📧 FUNCIÓN PARA ENVIAR EMAILS TRAS CREAR RESERVA
+const sendAdminReservationEmails = async (reservaCreada) => {
+  try {
+    console.log('📧 Enviando emails para nueva reserva:', reservaCreada.id);
+
+    // Obtener datos del trabajador
+    const trabajadorSeleccionado = trabajadores.find(t => t.id === reservaCreada.trabajador);
+    
+    // Obtener datos del servicio
+    const servicioSeleccionado = reservaCreada.servicio_id ? 
+      servicios.find(s => s.id === reservaCreada.servicio_id) : null;
+
+    // Obtener email del administrador
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    let adminEmail = null;
+    
+    if (currentUser) {
+      const { data: clienteData } = await supabase
+        .from('clientes')
+        .select('email')
+        .eq('id', currentUser.id)
+        .single();
+      
+      adminEmail = clienteData?.email || currentUser.email;
     }
 
-    if (!modalFormData.nombre.trim()) {
-      showMessage('El nombre es requerido', 'error');
-      return;
-    }
+    // Obtener configuración del negocio
+    const { data: businessConfig } = await supabase
+      .from('configuracion')
+      .select('*')
+      .eq('user_id', user.id)
+      .single();
 
-    if (!modalFormData.hora) {
-      showMessage('La hora es requerida', 'error');
-      return;
-    }
-
-    // Validar fecha/hora pasada
-    if (!modalData?.id && esFechaHoraPasada(modalData?.fecha, modalFormData.hora)) {
-      showMessage('No puedes crear reservas en fechas u horas pasadas', 'error');
-      return;
-    }
-
-    setGuardandoReserva(true);
-
-    const cliente = {
-      nombre: modalFormData.nombre.trim(),
-      telefono: modalFormData.telefono.trim(),
-      email: modalFormData.email.trim()
+    // Preparar datos para el email
+    const emailData = {
+      reservaData: {
+        id: reservaCreada.id,
+        fecha: reservaCreada.fecha,
+        hora: reservaCreada.hora,
+        cliente: reservaCreada.cliente,
+        observaciones: reservaCreada.observaciones || '',
+        estado: reservaCreada.estado || 'confirmada'
+      },
+      businessData: {
+        ...businessConfig,
+        user_email: adminEmail
+      },
+      workerData: trabajadorSeleccionado ? {
+        nombre: trabajadorSeleccionado.nombre
+      } : null,
+      serviceData: servicioSeleccionado,
+      isPublicReservation: false // Es una reserva desde admin
     };
 
-    const hora = modalFormData.hora;
-    const observaciones = modalFormData.observaciones || '';
-    const servicio_id = modalFormData.servicio ? parseInt(modalFormData.servicio) : null;
+    // 📧 ENVIAR EMAILS
+    const response = await fetch('/api/send-reservation-emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(emailData)
+    });
 
-    try {
-      if (modalData?.id) {
-        // Actualizar reserva existente
-        const { error } = await supabase
-          .from('reservas')
-          .update({
-            hora,
-            cliente,
-            observaciones,
-            servicio_id
-          })
-          .eq('id', modalData.id)
-          .eq('user_id', user.id);
+    const result = await response.json();
 
-        if (error) throw error;
-        showMessage('Reserva actualizada exitosamente', 'success');
+    if (result.success) {
+      console.log('✅ Emails enviados exitosamente:', result);
+      
+      let emailMessage = '📧 ';
+      if (result.details.clientEmailSent && result.details.adminEmailSent) {
+        emailMessage += 'Emails enviados al cliente y administrador';
+      } else if (result.details.clientEmailSent) {
+        emailMessage += 'Email enviado al cliente';
+      } else if (result.details.adminEmailSent) {
+        emailMessage += 'Email enviado al administrador';
       } else {
-        // Crear nueva reserva
-        const nuevaReserva = {
-          trabajador: trabajadorActivo,
-          fecha: modalData?.fecha,
+        emailMessage += 'Reserva creada (sin emails por configuración)';
+      }
+      
+      showMessage(emailMessage, 'success');
+    } else {
+      console.warn('⚠️ Error enviando emails:', result);
+      showMessage('Reserva creada correctamente (error enviando emails)', 'warning');
+    }
+
+  } catch (error) {
+    console.error('💥 Error enviando emails:', error);
+    // No mostramos error al usuario porque la reserva sí se creó
+    showMessage('Reserva creada correctamente', 'success');
+  }
+};
+
+// ✅ ACTUALIZAR LA FUNCIÓN guardarReserva EXISTENTE
+// Busca la función guardarReserva en tu archivo y reemplázala por esta:
+
+const guardarReserva = async () => {
+  if (!user || !trabajadorActivo) {
+    showMessage('Error: Usuario o trabajador no válido', 'error');
+    return;
+  }
+
+  if (!modalFormData.nombre.trim()) {
+    showMessage('El nombre es requerido', 'error');
+    return;
+  }
+
+  if (!modalFormData.hora) {
+    showMessage('La hora es requerida', 'error');
+    return;
+  }
+
+  // Validar fecha/hora pasada
+  if (!modalData?.id && esFechaHoraPasada(modalData?.fecha, modalFormData.hora)) {
+    showMessage('No puedes crear reservas en fechas u horas pasadas', 'error');
+    return;
+  }
+
+  setGuardandoReserva(true);
+
+  const cliente = {
+    nombre: modalFormData.nombre.trim(),
+    telefono: modalFormData.telefono.trim(),
+    email: modalFormData.email.trim()
+  };
+
+  const hora = modalFormData.hora;
+  const observaciones = modalFormData.observaciones || '';
+  const servicio_id = modalFormData.servicio ? parseInt(modalFormData.servicio) : null;
+
+  try {
+    if (modalData?.id) {
+      // ✅ ACTUALIZAR RESERVA EXISTENTE (NO ENVIAR EMAILS)
+      const { error } = await supabase
+        .from('reservas')
+        .update({
           hora,
           cliente,
           observaciones,
-          servicio_id,
-          estado: 'confirmada',
-          user_id: user.id
-        };
+          servicio_id
+        })
+        .eq('id', modalData.id)
+        .eq('user_id', user.id);
 
-        const { error } = await supabase
-          .from('reservas')
-          .insert([nuevaReserva]);
-
-        if (error) throw error;
-        showMessage('Reserva creada exitosamente', 'success');
-      }
-
-      await cargarReservas(user.id);
-      setModalData(null);
-      setModalFormData({
-        nombre: '',
-        telefono: '',
-        email: '',
-        hora: '',
-        servicio: '',
-        observaciones: ''
-      });
+      if (error) throw error;
+      showMessage('Reserva actualizada exitosamente', 'success');
       
-    } catch (error) {
-      console.error('❌ Error guardando reserva:', error);
-      showMessage(`Error al guardar la reserva: ${error.message}`, 'error');
-    } finally {
-      setGuardandoReserva(false);
+    } else {
+      // ✅ CREAR NUEVA RESERVA (SÍ ENVIAR EMAILS)
+      const nuevaReserva = {
+        trabajador: trabajadorActivo,
+        fecha: modalData?.fecha,
+        hora,
+        cliente,
+        observaciones,
+        servicio_id,
+        estado: 'confirmada',
+        user_id: user.id
+      };
+
+      const { data: reservaCreada, error } = await supabase
+        .from('reservas')
+        .insert([nuevaReserva])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      showMessage('Reserva creada exitosamente', 'success');
+
+      // 📧 ENVIAR EMAILS SOLO SI ES NUEVA RESERVA Y CLIENTE TIENE EMAIL
+      if (reservaCreada && cliente.email && cliente.email.trim()) {
+        await sendAdminReservationEmails(reservaCreada);
+      }
     }
-  };
+
+    await cargarReservas(user.id);
+    setModalData(null);
+    setModalFormData({
+      nombre: '',
+      telefono: '',
+      email: '',
+      hora: '',
+      servicio: '',
+      observaciones: ''
+    });
+    
+  } catch (error) {
+    console.error('❌ Error guardando reserva:', error);
+    showMessage(`Error al guardar la reserva: ${error.message}`, 'error');
+  } finally {
+    setGuardandoReserva(false);
+  }
+};
 
   const guardarBloqueo = async () => {
     if (!user || !trabajadorActivo) {
