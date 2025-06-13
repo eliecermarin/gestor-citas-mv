@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 
+ // 🔥 LOG PARA VERIFICAR VERSIÓN DEL ARCHIVO
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export default async function handler(req, res) {
