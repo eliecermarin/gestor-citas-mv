@@ -3,7 +3,12 @@ import { Resend } from 'resend';
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export default async function handler(req, res) {
+  // 🔥 VERIFICACIÓN DE VERSIÓN - ELIMINAR DESPUÉS
+  console.log('🔥 ARCHIVO ACTUALIZADO - VERSIÓN:', new Date().toISOString());
+  console.log('🔥 YA NO HAY EMAIL HARDCODEADO');
+
   if (req.method !== 'POST') {
+    console.log('❌ Método no permitido:', req.method);
     return res.status(405).json({ message: 'Método no permitido' });
   }
 
@@ -16,7 +21,21 @@ export default async function handler(req, res) {
       isPublicReservation = false
     } = req.body;
 
-    console.log('📧 Enviando emails para reserva:', reservaData.id);
+    console.log('📧 Datos recibidos para emails:', {
+      reservaId: reservaData?.id,
+      clienteEmail: reservaData?.cliente?.email,
+      adminEmail: businessData?.user_email,
+      businessName: businessData?.nombre_negocio
+    });
+
+    // ✅ VALIDAR DATOS MÍNIMOS
+    if (!reservaData || !reservaData.cliente) {
+      console.log('❌ Datos de reserva incompletos');
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Datos de reserva incompletos' 
+      });
+    }
 
     // ✅ EMAIL PARA EL CLIENTE
     const clientEmailHtml = generateClientEmailTemplate({
@@ -39,10 +58,12 @@ export default async function handler(req, res) {
     const emailPromises = [];
 
     // 📧 ENVIAR EMAIL AL CLIENTE
-    if (reservaData.cliente?.email) {
+    if (reservaData.cliente?.email && reservaData.cliente.email.trim()) {
+      console.log('📧 Preparando email para cliente:', reservaData.cliente.email);
+      
       emailPromises.push(
         resend.emails.send({
-          from: process.env.SYSTEM_EMAIL_FROM,
+          from: process.env.SYSTEM_EMAIL_FROM || 'Sistema de Reservas <reservas@gestordecitasmv.es>',
           to: [reservaData.cliente.email],
           replyTo: businessData?.telefono_contacto ? 
             `${businessData.nombre_negocio} <info@gestordecitasmv.es>` : 
@@ -51,21 +72,43 @@ export default async function handler(req, res) {
           html: clientEmailHtml,
         })
       );
+    } else {
+      console.log('⚠️ Cliente sin email, saltando envío al cliente');
     }
 
     // 📧 ENVIAR EMAIL AL ADMINISTRADOR
-    if (businessData?.user_email) {
+    if (businessData?.user_email && businessData.user_email.trim()) {
+      console.log('📧 Preparando email para administrador:', businessData.user_email);
+      
       emailPromises.push(
         resend.emails.send({
-          from: process.env.SYSTEM_EMAIL_FROM,
+          from: process.env.SYSTEM_EMAIL_FROM || 'Sistema de Reservas <reservas@gestordecitasmv.es>',
           to: [businessData.user_email],
           subject: `🔔 Nueva reserva recibida - ${reservaData.cliente?.nombre}`,
           html: adminEmailHtml,
         })
       );
+    } else {
+      console.log('⚠️ Admin sin email, saltando envío al administrador');
+    }
+
+    if (emailPromises.length === 0) {
+      console.log('⚠️ No hay emails para enviar');
+      return res.status(200).json({
+        success: true,
+        emailsSent: 0,
+        emailsFailed: 0,
+        message: 'Reserva procesada pero sin emails configurados',
+        details: {
+          clientEmailSent: false,
+          adminEmailSent: false
+        }
+      });
     }
 
     // ⚡ ENVIAR TODOS LOS EMAILS
+    console.log(`📧 Enviando ${emailPromises.length} emails...`);
+    
     const results = await Promise.allSettled(emailPromises);
     
     // 📊 ANALIZAR RESULTADOS
@@ -78,18 +121,23 @@ export default async function handler(req, res) {
       console.error('❌ Emails fallidos:', failed.map(f => f.reason));
     }
 
+    // Log detalles de éxito
+    successful.forEach((result, index) => {
+      console.log(`✅ Email ${index + 1} enviado exitosamente:`, result.value);
+    });
+
     return res.status(200).json({
       success: true,
       emailsSent: successful.length,
       emailsFailed: failed.length,
       details: {
         clientEmailSent: reservaData.cliente?.email ? successful.length > 0 : false,
-        adminEmailSent: businessData?.user_email ? successful.length > 1 : false
+        adminEmailSent: businessData?.user_email ? successful.length > (reservaData.cliente?.email ? 1 : 0) : false
       }
     });
 
   } catch (error) {
-    console.error('💥 Error enviando emails:', error);
+    console.error('💥 Error completo enviando emails:', error);
     
     return res.status(500).json({
       success: false,
