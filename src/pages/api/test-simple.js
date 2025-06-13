@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   try {
     const { data, error } = await resend.emails.send({
       from: 'reservas@gestordecitasmv.es',
-      to: ['TU_EMAIL_PERSONAL@gmail.com'], // ← CAMBIA ESTE EMAIL
+      to: ['mariavalerogca@gmail.com'], // ← CAMBIA ESTE EMAIL
       subject: 'Test Directo Resend',
       html: '<h1>¡Funciona!</h1><p>Resend está enviando emails correctamente.</p>'
     });
