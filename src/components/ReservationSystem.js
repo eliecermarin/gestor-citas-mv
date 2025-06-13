@@ -34,14 +34,16 @@ export default function ReservationSystem({ businessId }) {
   const [businessConfig, setBusinessConfig] = useState(null);
   const [existingReservations, setExistingReservations] = useState([]);
   const [currentBusinessId, setCurrentBusinessId] = useState(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState(null); // ← NUEVA LÍNEA
 
   // Obtener el businessId del usuario actual
   useEffect(() => {
     const getUserBusinessId = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        cconst { data: { user } } = await supabase.auth.getUser();
         if (user) {
           setCurrentBusinessId(user.id);
+          setCurrentUserEmail(user.email); // ← NUEVA LÍNEA
         } else if (businessId) {
           setCurrentBusinessId(businessId);
         } else {
@@ -471,20 +473,9 @@ export default function ReservationSystem({ businessId }) {
       const servicioSeleccionado = reservaCreada.servicio_id ? 
         services.find(s => s.id === reservaCreada.servicio_id) : null;
 
-      // Obtener email del administrador
-      let adminEmail = null;
-      try {
-        const { data: clienteData } = await supabase
-          .from('clientes')
-          .select('email')
-          .eq('id', businessId)
-          .single();
-        
-        adminEmail = clienteData?.email;
-        console.log('📧 Email del admin encontrado:', adminEmail);
-      } catch (error) {
-        console.warn('No se pudo obtener email del administrador:', error);
-      }
+      //Obtener email del administrador (desde usuario aute
+      const adminEmail = currentUserEmail;
+      console.log('📧 Email del admin (desde auth):', adminEmail);
 
       // Obtener configuración del negocio
       const { data: businessConfig } = await supabase
