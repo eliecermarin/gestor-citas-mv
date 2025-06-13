@@ -3,9 +3,7 @@ import { Resend } from 'resend';
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export default async function handler(req, res) {
-  // 🔥 VERIFICACIÓN DE VERSIÓN - ELIMINAR DESPUÉS
-  console.log('🔥 ARCHIVO ACTUALIZADO - VERSIÓN:', new Date().toISOString());
-  console.log('🔥 YA NO HAY EMAIL HARDCODEADO');
+  console.log('📧 SISTEMA DE EMAILS CON REPLY-TO DIRECTO - VERSIÓN:', new Date().toISOString());
 
   if (req.method !== 'POST') {
     console.log('❌ Método no permitido:', req.method);
@@ -57,17 +55,21 @@ export default async function handler(req, res) {
 
     const emailPromises = [];
 
-    // 📧 ENVIAR EMAIL AL CLIENTE
+    // 📧 ENVIAR EMAIL AL CLIENTE CON REPLY-TO AL ADMINISTRADOR
     if (reservaData.cliente?.email && reservaData.cliente.email.trim()) {
       console.log('📧 Preparando email para cliente:', reservaData.cliente.email);
+      console.log('📧 Reply-To configurado a:', businessData?.user_email);
+      
+      // ✅ CONFIGURAR REPLY-TO CORRECTO
+      const replyToEmail = businessData?.user_email && businessData.user_email.trim() ? 
+        `${businessData?.nombre_negocio || 'Administrador'} <${businessData.user_email}>` : 
+        'info@gestordecitasmv.es';
       
       emailPromises.push(
         resend.emails.send({
           from: process.env.SYSTEM_EMAIL_FROM || 'Sistema de Reservas <reservas@gestordecitasmv.es>',
           to: [reservaData.cliente.email],
-          replyTo: businessData?.telefono_contacto ? 
-            `${businessData.nombre_negocio} <info@gestordecitasmv.es>` : 
-            'info@gestordecitasmv.es',
+          replyTo: replyToEmail, // ✅ AQUÍ ESTÁ EL CAMBIO CLAVE
           subject: `✅ Reserva confirmada - ${businessData?.nombre_negocio || 'Gestor de Citas MV'}`,
           html: clientEmailHtml,
         })
@@ -132,7 +134,8 @@ export default async function handler(req, res) {
       emailsFailed: failed.length,
       details: {
         clientEmailSent: reservaData.cliente?.email ? successful.length > 0 : false,
-        adminEmailSent: businessData?.user_email ? successful.length > (reservaData.cliente?.email ? 1 : 0) : false
+        adminEmailSent: businessData?.user_email ? successful.length > (reservaData.cliente?.email ? 1 : 0) : false,
+        replyToConfigured: businessData?.user_email || 'info@gestordecitasmv.es' // ✅ NUEVO: Info sobre reply-to
       }
     });
 
@@ -147,7 +150,7 @@ export default async function handler(req, res) {
   }
 }
 
-// ✅ TEMPLATE PARA EMAIL DEL CLIENTE
+// ✅ TEMPLATE PARA EMAIL DEL CLIENTE - MEJORADO
 function generateClientEmailTemplate({ reservaData, businessData, workerData, serviceData, isPublicReservation }) {
   const fechaFormateada = new Date(reservaData.fecha).toLocaleDateString('es-ES', {
     weekday: 'long',
@@ -260,6 +263,21 @@ function generateClientEmailTemplate({ reservaData, businessData, workerData, se
           color: #1e40af;
           margin-bottom: 10px;
         }
+        .reply-info {
+          background: #f0fdf4;
+          border-radius: 8px;
+          padding: 20px;
+          margin: 20px 0;
+          border: 1px solid #bbf7d0;
+        }
+        .reply-title {
+          font-weight: 600;
+          color: #16a34a;
+          margin-bottom: 10px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
         .footer {
           text-align: center;
           margin-top: 30px;
@@ -343,12 +361,25 @@ function generateClientEmailTemplate({ reservaData, businessData, workerData, se
         </div>
         ` : ''}
 
+        <!-- ✅ NUEVA SECCIÓN: Info sobre responder al email -->
+        <div class="reply-info">
+          <div class="reply-title">
+            💬 ¿Necesitas contactar con nosotros?
+          </div>
+          <p style="margin: 0; color: #15803d;">
+            <strong>¡Responde directamente a este email!</strong> Tu mensaje llegará automáticamente a ${nombreNegocio} y podremos ayudarte con cualquier consulta sobre tu reserva.
+          </p>
+          <p style="margin: 10px 0 0 0; color: #059669; font-size: 14px;">
+            También puedes llamarnos${businessData?.telefono_contacto ? ` al ${businessData.telefono_contacto}` : ''} si prefieres contacto directo.
+          </p>
+        </div>
+
         <p><strong>¿Necesitas cambiar algo?</strong></p>
-        <p>Si necesitas modificar o cancelar tu reserva, ponte en contacto con nosotros lo antes posible.</p>
+        <p>Si necesitas modificar o cancelar tu reserva, simplemente responde a este email o contacta con nosotros lo antes posible.</p>
 
         <div class="footer">
           <p>Este email fue enviado automáticamente por el Gestor de Citas MV.</p>
-          <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
+          <p><strong style="color: #10b981;">💡 Tip:</strong> Puedes responder directamente a este email para contactar con ${nombreNegocio}</p>
           ${isPublicReservation && businessData?.slug ? `
           <p style="margin-top: 15px;">
             <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://www.gestordecitasmv.es'}/reservas/${businessData.slug}" class="btn">
@@ -363,7 +394,7 @@ function generateClientEmailTemplate({ reservaData, businessData, workerData, se
   `;
 }
 
-// ✅ TEMPLATE PARA EMAIL DEL ADMINISTRADOR
+// ✅ TEMPLATE PARA EMAIL DEL ADMINISTRADOR (SIN CAMBIOS)
 function generateAdminEmailTemplate({ reservaData, businessData, workerData, serviceData, isPublicReservation }) {
   const fechaFormateada = new Date(reservaData.fecha).toLocaleDateString('es-ES', {
     weekday: 'long',
@@ -475,6 +506,14 @@ function generateAdminEmailTemplate({ reservaData, businessData, workerData, ser
           color: #64748b;
           font-size: 14px;
         }
+        .reply-notice {
+          background: #f0fdf4;
+          border-radius: 8px;
+          padding: 15px;
+          margin: 20px 0;
+          border: 1px solid #bbf7d0;
+          text-align: center;
+        }
         @media only screen and (max-width: 600px) {
           body { padding: 10px; }
           .container { padding: 20px; }
@@ -491,6 +530,13 @@ function generateAdminEmailTemplate({ reservaData, businessData, workerData, ser
             ${isPublicReservation ? '🌐 Reserva Online' : '👤 Reserva Interna'}
           </div>
           <p>Se ha registrado una nueva reserva en ${nombreNegocio}</p>
+        </div>
+
+        <!-- ✅ NUEVA SECCIÓN: Aviso sobre respuestas del cliente -->
+        <div class="reply-notice">
+          <p style="margin: 0; color: #16a34a; font-weight: 600;">
+            💬 Si ${reservaData.cliente?.nombre} responde al email de confirmación, recibirás su mensaje directamente en esta bandeja de entrada.
+          </p>
         </div>
 
         <div class="client-info">
@@ -576,6 +622,9 @@ function generateAdminEmailTemplate({ reservaData, businessData, workerData, ser
           <p>Esta notificación fue enviada automáticamente por el Gestor de Citas MV.</p>
           <p><strong>ID de Reserva:</strong> ${reservaData.id}</p>
           <p><strong>Fecha de creación:</strong> ${new Date().toLocaleString('es-ES')}</p>
+          <p style="color: #16a34a; font-weight: 600; margin-top: 15px;">
+            📧 Las respuestas del cliente llegarán directamente a tu email
+          </p>
         </div>
       </div>
     </body>
