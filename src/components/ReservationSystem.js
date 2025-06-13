@@ -34,16 +34,17 @@ export default function ReservationSystem({ businessId }) {
   const [businessConfig, setBusinessConfig] = useState(null);
   const [existingReservations, setExistingReservations] = useState([]);
   const [currentBusinessId, setCurrentBusinessId] = useState(null);
-  const [currentUserEmail, setCurrentUserEmail] = useState(null); // ← NUEVA LÍNEA
+  const [currentUserEmail, setCurrentUserEmail] = useState(null); // ✅ NUEVO ESTADO
 
   // Obtener el businessId del usuario actual
   useEffect(() => {
     const getUserBusinessId = async () => {
       try {
-        cconst { data: { user } } = await supabase.auth.getUser();
+        const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           setCurrentBusinessId(user.id);
-          setCurrentUserEmail(user.email); // ← NUEVA LÍNEA
+          setCurrentUserEmail(user.email); // ✅ CAPTURAR EMAIL DEL USUARIO
+          console.log('✅ Usuario autenticado:', user.email);
         } else if (businessId) {
           setCurrentBusinessId(businessId);
         } else {
@@ -461,7 +462,7 @@ export default function ReservationSystem({ businessId }) {
     }
   };
 
-  // 📧 FUNCIÓN PARA ENVIAR EMAILS TRAS RESERVA PÚBLICA
+  // 📧 FUNCIÓN MEJORADA PARA ENVIAR EMAILS TRAS RESERVA PÚBLICA
   const sendReservationEmails = async (reservaCreada, businessId) => {
     try {
       console.log('📧 EJECUTANDO sendReservationEmails - reserva:', reservaCreada.id);
@@ -473,9 +474,9 @@ export default function ReservationSystem({ businessId }) {
       const servicioSeleccionado = reservaCreada.servicio_id ? 
         services.find(s => s.id === reservaCreada.servicio_id) : null;
 
-      //Obtener email del administrador (desde usuario aute
+      // ✅ USAR EMAIL DEL USUARIO AUTENTICADO EN LUGAR DE BUSCAR EN TABLA CLIENTES
       const adminEmail = currentUserEmail;
-      console.log('📧 Email del admin (desde auth):', adminEmail);
+      console.log('📧 Email del admin (desde usuario autenticado):', adminEmail);
 
       // Obtener configuración del negocio
       const { data: businessConfig } = await supabase
@@ -498,7 +499,7 @@ export default function ReservationSystem({ businessId }) {
         },
         businessData: {
           ...businessConfig,
-          user_email: adminEmail
+          user_email: adminEmail // ✅ USAR EMAIL DEL USUARIO AUTENTICADO
         },
         workerData: trabajadorSeleccionado ? {
           nombre: trabajadorSeleccionado.nombre
